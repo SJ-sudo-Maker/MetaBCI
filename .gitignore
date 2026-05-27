@@ -157,4 +157,4 @@ cython_debug/
 
 .checkpoints
 /checkpoints
-.checkpoints/
+.checkpoints/~.docx
