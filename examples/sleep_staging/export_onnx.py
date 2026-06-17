@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-ONNX export + INT8 quantization pipeline for LWSleepNet.
+ONNX export + INT8 quantization pipeline for ParaSleep.
 
 Usage
 -----
-    python export_onnx.py --checkpoint lwsleepnet.pth --output lwsleepnet_int8.onnx
+    python export_onnx.py --checkpoint parasleep.pth --output parasleep_int8.onnx
 
 Workflow:
-    1. Load trained LWSleepNet checkpoint
+    1. Load trained ParaSleep checkpoint
     2. Export to FP32 ONNX
     3. INT8 static quantization (via ONNX Runtime)
     4. Verify accuracy on test data
@@ -29,7 +29,7 @@ from onnxruntime.quantization import quantize_static, QuantType, CalibrationData
 
 from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
 from metabci.brainda.paradigms.sleep import SleepParadigm
-import metabci.brainda.algorithms.deep_learning.lwsleepnet as lwmod
+import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 
 
 # =============================================================================
@@ -62,13 +62,13 @@ class SleepCalibrationDataReader(CalibrationDataReader):
 # Export
 # =============================================================================
 
-def export_to_onnx(model, onnx_path: str, opset: int = 17):
+def export_to_onnx(model, onnx_path: str, n_channels: int = 3, opset: int = 17):
     """Export PyTorch model to FP32 ONNX.
 
     Parameters
     ----------
     model : nn.Module
-        Trained LWSleepNet model (float32, eval mode).
+        Trained ParaSleep model (float32, eval mode).
     onnx_path : str
         Output .onnx file path.
     opset : int
@@ -77,7 +77,7 @@ def export_to_onnx(model, onnx_path: str, opset: int = 17):
     model.eval()
     model.cpu()
 
-    dummy = torch.randn(1, 1, 3000, dtype=torch.float32)
+    dummy = torch.randn(1, n_channels, 3000, dtype=torch.float32)
     input_names = ["X"]
     output_names = ["output"]
     dynamic_axes = {
@@ -184,7 +184,10 @@ def verify_accuracy(onnx_path: str, X_test: np.ndarray, y_test: np.ndarray,
             with torch.no_grad():
                 pt_out = pytorch_model(
                     torch.from_numpy(x)
-                ).numpy()
+                )
+                if isinstance(pt_out, list):
+                    pt_out = torch.stack(pt_out).mean(0)
+                pt_out = pt_out.numpy()
             if np.argmax(onnx_out) == np.argmax(pt_out):
                 pt_match += 1
 
@@ -248,11 +251,11 @@ def benchmark(onnx_path: str, X_test: np.ndarray, n_warmup: int = 10,
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="LWSleepNet ONNX export + INT8 quantization")
+    parser = argparse.ArgumentParser(description="ParaSleep ONNX export + INT8 quantization")
     parser.add_argument("--checkpoint", type=str, required=True,
-                        help="Path to trained LWSleepNet .pth checkpoint")
-    parser.add_argument("--output", type=str, default="lwsleepnet_int8.onnx",
-                        help="Output ONNX path (default: lwsleepnet_int8.onnx)")
+                        help="Path to trained ParaSleep .pth checkpoint")
+    parser.add_argument("--output", type=str, default="parasleep_int8.onnx",
+                        help="Output ONNX path (default: parasleep_int8.onnx)")
     parser.add_argument("--data-root", type=str,
                         default=r"D:\sleep eeg\sleep-edf-database-expanded-1.0.0\sleep-cassette",
                         help="Path to sleep-edf data root")
@@ -263,36 +266,48 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("LWSleepNet ONNX Export + INT8 Quantization")
+    print("ParaSleep ONNX Export + INT8 Quantization")
     print("=" * 60)
 
     # ---- 1. Load model ----
     print("\n[1/5] Loading trained model...")
-    raw_cls = lwmod.LWSleepNet.module
-    model = raw_cls(n_channels=1, n_samples=3000, n_classes=5).float()
+    raw_cls = lwmod.ParaSleep.module
+    # Auto-detect: use 3-channel for multi-head/3-ctx models, 1-channel for standard
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    model.load_state_dict(state)
+    # Check if it's a multi-head model
+    is_mh = any(k.startswith("head.heads.") for k in state.keys())
+    n_ch = 3  # our best models all use 3-epoch context
+
+    if is_mh:
+        from metabci.brainda.algorithms.deep_learning.parasleep_mh import ParaSleepMH as ModelCls
+        model = ModelCls.module(n_channels=n_ch, n_samples=3000, n_classes=5).float()
+        model.load_state_dict(state)
+    else:
+        model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5).float()
+        # Handle missing/mismatched keys
+        model.load_state_dict(state, strict=False)
     model.eval()
     total_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {total_params:,}")
 
-    # ---- 2. Load calibration data ----
+    # ---- 2. Load calibration data (from cache if available) ----
     print("\n[2/5] Loading calibration data...")
-    dataset = SleepEDFDataset(args.data_root, channel="EEG Fpz-Cz")
-    paradigm = SleepParadigm(channels=["EEG Fpz-Cz"], srate=100)
-    cal_subs = dataset.subjects[:min(args.verify, len(dataset.subjects))]
-    X_cal, y_cal, _ = paradigm.get_data(
-        dataset, subjects=cal_subs, return_concat=True, n_jobs=1,
-    )
-    X_cal = X_cal.astype(np.float32)
-    y_cal = y_cal.astype(np.int64)
+    import os as _os
+    cache_dir = "data_cache"
+    cal_subs = sorted([f.replace('.npz','') for f in _os.listdir(cache_dir) if f.endswith('.npz')])[:args.verify]
+    X_list, y_list = [], []
+    for s in cal_subs:
+        d = np.load(_os.path.join(cache_dir, f"{s}.npz"))
+        X_list.append(d['X']); y_list.append(d['y'])
+    X_cal = np.concatenate(X_list).astype(np.float32)
+    y_cal = np.concatenate(y_list).astype(np.int64)
     print(f"  Subjects: {cal_subs}")
     print(f"  Samples: {X_cal.shape[0]}")
 
     # ---- 3. Export to ONNX ----
     print("\n[3/5] Exporting to FP32 ONNX...")
     fp32_path = args.output.replace(".onnx", "_fp32.onnx")
-    export_to_onnx(model, fp32_path)
+    export_to_onnx(model, fp32_path, n_channels=n_ch)
 
     # ---- 4. INT8 quantization ----
     if args.skip_quantize:

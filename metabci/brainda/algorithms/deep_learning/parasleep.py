@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LWSleepNet: Lightweight Sleep Staging Network.
+ParaSleep: Lightweight Sleep Staging Network.
 
 A lightweight deep learning model for single-channel EEG sleep staging,
 featuring dual-branch depthwise separable convolutions for multi-resolution
@@ -9,7 +9,7 @@ dependency modeling.
 
 Reference
 ---------
-Yang, C., Li, B., Li, Y., He, Y., & Zhang, Y. (2023). LWSleepNet: A
+Yang, C., Li, B., Li, Y., He, Y., & Zhang, Y. (2023). ParaSleep: A
 lightweight attention-based deep learning model for sleep staging with
 singlechannel EEG. Digital Health, 9, 20552076231188206.
 """
@@ -181,8 +181,8 @@ class TemporalAttentionBlock(nn.Module):
 # ---------------------------------------------------------------------------
 
 @SkorchNet
-class LWSleepNet(nn.Module):
-    """LWSleepNet: lightweight single-channel EEG sleep staging model.
+class ParaSleep(nn.Module):
+    """ParaSleep: lightweight single-channel EEG sleep staging model.
 
     Architecture
     ------------
@@ -207,7 +207,7 @@ class LWSleepNet(nn.Module):
     Examples
     --------
     >>> # X: (n_epochs, n_channels, n_samples)
-    >>> model = LWSleepNet(X.shape[1], X.shape[2], 5)
+    >>> model = ParaSleep(X.shape[1], X.shape[2], 5)
     >>> model.fit(X[train_idx], y[train_idx])
     """
 

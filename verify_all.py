@@ -35,8 +35,8 @@ try:
 except Exception as e: fail(f'SleepParadigm: {e}')
 
 try:
-    import metabci.brainda.algorithms.deep_learning.lwsleepnet as lwmod
-    raw = lwmod.LWSleepNet.module
+    import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
+    raw = lwmod.ParaSleep.module
     m = raw(1, 3000, 5).float()
     pcount = sum(pn.numel() for pn in m.parameters())
     assert pcount == 131645
@@ -49,10 +49,10 @@ try:
     m2 = raw(1,3000,5).double().eval()
     with torch.no_grad():
         m2(torch.randn(2,1,3000,dtype=torch.float64))
-    sk = lwmod.LWSleepNet(1,3000,5)
+    sk = lwmod.ParaSleep(1,3000,5)
     assert hasattr(sk,'fit') and hasattr(sk,'predict')
-    ok(f'LWSleepNet: {pcount} params, fp32+fp64+grad+SkorchNet')
-except Exception as e: fail(f'LWSleepNet: {e}')
+    ok(f'ParaSleep: {pcount} params, fp32+fp64+grad+SkorchNet')
+except Exception as e: fail(f'ParaSleep: {e}')
 
 # =============================================
 # 2. brainflow: Worker + EDF Player
@@ -138,7 +138,7 @@ try:
     from onnxruntime.quantization import quantize_static, QuantType, CalibrationDataReader
 
     tmp = tempfile.gettempdir()
-    onnx_path = os.path.join(tmp, '_verify_lwsleepnet.onnx')
+    onnx_path = os.path.join(tmp, '_verify_parasleep.onnx')
     m_onnx = raw(1, 3000, 5).float().eval()
     dummy = torch.randn(1, 1, 3000)
     torch.onnx.export(m_onnx, dummy, onnx_path,

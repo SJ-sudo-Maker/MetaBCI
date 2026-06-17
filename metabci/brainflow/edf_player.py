@@ -252,7 +252,7 @@ def quick_test(
     edf_path : str
         Path to PSG EDF.
     model : nn.Module
-        Trained LWSleepNet (float32, eval mode).
+        Trained ParaSleep (float32, eval mode).
     hypnogram_path : str, optional
         Path to hypnogram for accuracy comparison.
     channel : str
