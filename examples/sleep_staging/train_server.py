@@ -33,11 +33,11 @@ parser.add_argument('--cache', type=str, default='data_cache',
                     help='Cache directory')
 parser.add_argument('--subjects', type=int, default=80, help='Train subjects')
 parser.add_argument('--test', type=int, default=10, help='Test subjects')
-parser.add_argument('--epochs', type=int, default=100)
+parser.add_argument('--epochs', type=int, default=200)
 parser.add_argument('--batch', type=int, default=128)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--context', type=int, default=3, help='Context window (odd)')
-parser.add_argument('--cv', type=int, default=0, help='K-fold CV (0=single run)')
+parser.add_argument('--cv', type=int, default=5, help='K-fold CV (0=single run)')
 parser.add_argument('--save', type=str, default='parasleep_best.pth')
 parser.add_argument('--device', type=str, default='cuda',
                     help='cuda / cpu')
@@ -188,7 +188,7 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
             for Xb, yb in val_loader:
                 Xb, yb = Xb.to(DEVICE), yb.to(DEVICE)
                 all_vpred.append(model(Xb).argmax(1).cpu().numpy())
-                all_vtrue.append(yb.numpy())
+                all_vtrue.append(yb.cpu().numpy())
         val_acc = (np.concatenate(all_vpred) == np.concatenate(all_vtrue)).mean()
         # Macro F1 — equal weight to all 5 classes, not dominated by W
         val_f1 = f1_score(np.concatenate(all_vtrue), np.concatenate(all_vpred),
