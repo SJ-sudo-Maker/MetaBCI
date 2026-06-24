@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
 import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 
@@ -183,26 +183,29 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
         sched.step()
 
         model.eval()
-        vc, vt = 0, 0
+        all_vpred, all_vtrue = [], []
         with torch.no_grad():
             for Xb, yb in val_loader:
                 Xb, yb = Xb.to(DEVICE), yb.to(DEVICE)
-                vc += (model(Xb).argmax(1) == yb).sum().item()
-                vt += yb.size(0)
-        val_acc = vc / vt
+                all_vpred.append(model(Xb).argmax(1).cpu().numpy())
+                all_vtrue.append(yb.numpy())
+        val_acc = (np.concatenate(all_vpred) == np.concatenate(all_vtrue)).mean()
+        # Macro F1 — equal weight to all 5 classes, not dominated by W
+        val_f1 = f1_score(np.concatenate(all_vtrue), np.concatenate(all_vpred),
+                          average='macro', zero_division=0)
 
         train_losses.append(tr_loss / len(X_tr))
         val_accs.append(val_acc)
 
-        if val_acc > best_val:
-            best_val = val_acc; best_epoch = epoch
+        if val_f1 > best_val:
+            best_val = val_f1; best_epoch = epoch
             torch.save(model.state_dict(), args.save)
 
         if epoch == 1 or epoch % 10 == 0:
             elapsed = time.time() - global_start
-            marker = " *" if val_acc == best_val else ""
+            marker = " *" if val_f1 == best_val else ""
             print(f"  Epoch {epoch:3d}/{args.epochs} | loss={tr_loss/len(X_tr):.4f} | "
-                  f"val={val_acc:.3f} | best={best_val:.3f}@{best_epoch}{marker} | "
+                  f"val_f1={val_f1:.3f} | best_f1={best_val:.3f}@{best_epoch}{marker} | "
                   f"{elapsed/60:.0f}min")
 
     # Test
