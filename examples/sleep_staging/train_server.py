@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-ParaSleep server training — full-scale with K-fold CV support.
+ParaSleep server training — full-scale with subject-wise validation.
 
 Usage:
     python train_server.py                          # full training
@@ -16,7 +16,6 @@ import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
 
 import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 
@@ -28,7 +27,7 @@ import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 parser = argparse.ArgumentParser()
 parser.add_argument('--data', type=str,
                     default=os.environ.get('SLEEP_DATA',
-                    '/root/autodl-tmp/sleep-edf/sleep-cassette'),
+                    r'F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette'),
                     help='Path to sleep-cassette directory')
 parser.add_argument('--cache', type=str, default='data_cache',
                     help='Cache directory')
@@ -49,6 +48,7 @@ DEVICE = args.device if torch.cuda.is_available() else 'cpu'
 
 print(f"Device: {DEVICE} | Subjects: {args.subjects} | Epochs: {args.epochs}")
 print(f"Data: {args.data} | Cache: {args.cache}")
+
 
 # =============================================================================
 # Focal Loss
@@ -71,14 +71,12 @@ class FocalLoss(nn.Module):
 # =============================================================================
 
 def load_cache_subjects(cache_dir):
-    """List available cached subjects."""
     if not os.path.isdir(cache_dir):
         return []
     return sorted([f.replace('.npz','') for f in os.listdir(cache_dir)
                    if f.endswith('.npz')])
 
 def build_cache(data_root, cache_dir):
-    """Build cache from raw EDF files if not present."""
     if os.path.isdir(cache_dir) and len(load_cache_subjects(cache_dir)) > 0:
         print(f"  Cache exists: {len(load_cache_subjects(cache_dir))} subjects")
         return
@@ -110,28 +108,45 @@ def build_cache(data_root, cache_dir):
     print(f"  Cache built: {len(load_cache_subjects(cache_dir))} subjects")
 
 
-def load_windows(subjects, cache_dir, half=1):
-    """Load 3-epoch windows from cache."""
-    X_list, y_list = [], []
+def load_windows(subjects, cache_dir):
+    X_list, y_list, subj_list = [], [], []
     for s in subjects:
         p = os.path.join(cache_dir, f'{s}.npz')
         if os.path.exists(p):
             d = np.load(p)
             X_list.append(d['X']); y_list.append(d['y'])
-    return np.concatenate(X_list), np.concatenate(y_list)
+            subj_list.extend([s] * len(d['y']))
+    return np.concatenate(X_list), np.concatenate(y_list), np.array(subj_list)
 
 
 # =============================================================================
 # Train single fold
 # =============================================================================
 
-def train_fold(X_train, y_train, X_test, y_test, fold_name=''):
-    """Train one fold, return metrics dict."""
+def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
     global_start = time.time()
 
-    # Split train into train/val
-    X_tr, X_val, y_tr, y_val = train_test_split(
-        X_train, y_train, test_size=0.2, stratify=y_train, random_state=42)
+    # === Subject-wise validation split ===
+    # Same subject's epochs go entirely to train OR val — no leakage
+    unique_subs = np.unique(subj_train)
+    rng = np.random.RandomState(42)
+    rng.shuffle(unique_subs)
+    n_val_subs = max(1, int(len(unique_subs) * 0.2))
+    val_subs = set(unique_subs[:n_val_subs])
+    tr_subs = set(unique_subs[n_val_subs:])
+
+    tr_mask = np.array([s in tr_subs for s in subj_train])
+    val_mask = np.array([s in val_subs for s in subj_train])
+
+    X_tr, y_tr = X_train[tr_mask], y_train[tr_mask]
+    X_val, y_val = X_train[val_mask], y_train[val_mask]
+
+    print(f"\n  {'='*50}")
+    print(f"  Fold {fold_name}")
+    print(f"  Train: {X_tr.shape[0]} epochs ({len(tr_subs)} subjects)")
+    print(f"  Val:   {X_val.shape[0]} epochs ({len(val_subs)} subjects)")
+    print(f"  Test:  {X_test.shape[0]} epochs")
+    print(f"  {'='*50}")
 
     tr_ds = TensorDataset(torch.from_numpy(X_tr), torch.from_numpy(y_tr))
     val_ds = TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val))
@@ -140,15 +155,12 @@ def train_fold(X_train, y_train, X_test, y_test, fold_name=''):
     val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False)
     te_loader = DataLoader(te_ds, batch_size=args.batch, shuffle=False)
 
-    print(f"\n  {'='*50}")
-    print(f"  Fold {fold_name}: Train={X_tr.shape[0]}, Val={X_val.shape[0]}, Test={X_test.shape[0]}")
-    print(f"  {'='*50}")
-
-    # Class weights
+    # Class weights (computed from training set only)
     _, counts = np.unique(y_tr, return_counts=True)
     raw = np.sqrt([len(y_tr) / c for c in counts])
     raw = np.clip(raw / raw.min(), 1.0, 10.0)
     cw = torch.tensor(raw, dtype=torch.float32).to(DEVICE)
+    print(f"  Class weights: {raw.tolist()}")
 
     # Model
     raw_cls = lwmod.ParaSleep.module
@@ -157,17 +169,19 @@ def train_fold(X_train, y_train, X_test, y_test, fold_name=''):
     opt = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1.0, betas=(0.9, 0.999))
     sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
 
-    best_val = 0; best_epoch = 0
+    best_val = 0; best_epoch = 0; train_losses = []; val_accs = []
+
     for epoch in range(1, args.epochs + 1):
         model.train()
+        tr_loss = 0
         for Xb, yb in tr_loader:
             Xb, yb = Xb.to(DEVICE), yb.to(DEVICE)
             out = model(Xb)
             loss = focal(out, yb)
             opt.zero_grad(); loss.backward(); opt.step()
+            tr_loss += loss.item() * Xb.size(0)
         sched.step()
 
-        # Validate
         model.eval()
         vc, vt = 0, 0
         with torch.no_grad():
@@ -177,14 +191,19 @@ def train_fold(X_train, y_train, X_test, y_test, fold_name=''):
                 vt += yb.size(0)
         val_acc = vc / vt
 
+        train_losses.append(tr_loss / len(X_tr))
+        val_accs.append(val_acc)
+
         if val_acc > best_val:
             best_val = val_acc; best_epoch = epoch
             torch.save(model.state_dict(), args.save)
 
-        if epoch == 1 or epoch % 20 == 0:
+        if epoch == 1 or epoch % 10 == 0:
             elapsed = time.time() - global_start
-            print(f"  Epoch {epoch:3d}/{args.epochs} | val={val_acc:.3f} | "
-                  f"best={best_val:.3f}@{best_epoch} | {elapsed/60:.0f}min")
+            marker = " *" if val_acc == best_val else ""
+            print(f"  Epoch {epoch:3d}/{args.epochs} | loss={tr_loss/len(X_tr):.4f} | "
+                  f"val={val_acc:.3f} | best={best_val:.3f}@{best_epoch}{marker} | "
+                  f"{elapsed/60:.0f}min")
 
     # Test
     state = torch.load(args.save, map_location=DEVICE, weights_only=True)
@@ -201,14 +220,11 @@ def train_fold(X_train, y_train, X_test, y_test, fold_name=''):
     report = classification_report(yt, yp, target_names=['W','N1','N2','N3','REM'],
                                     digits=4, output_dict=True, zero_division=0)
     return {
-        'accuracy': acc,
-        'macro_f1': report['macro avg']['f1-score'],
-        'W_f1': report['W']['f1-score'],
-        'N1_f1': report['N1']['f1-score'],
-        'N2_f1': report['N2']['f1-score'],
-        'N3_f1': report['N3']['f1-score'],
+        'accuracy': acc, 'macro_f1': report['macro avg']['f1-score'],
+        'W_f1': report['W']['f1-score'], 'N1_f1': report['N1']['f1-score'],
+        'N2_f1': report['N2']['f1-score'], 'N3_f1': report['N3']['f1-score'],
         'REM_f1': report['REM']['f1-score'],
-        'y_pred': yp, 'y_true': yt,
+        'y_pred': yp, 'y_true': yt, 'val_accs': val_accs, 'train_losses': train_losses,
     }
 
 
@@ -220,12 +236,10 @@ print('=' * 60)
 print('ParaSleep Server Training')
 print('=' * 60)
 
-# Build or verify cache
 build_cache(args.data, args.cache)
 all_subs = load_cache_subjects(args.cache)
 print(f'Cached subjects: {len(all_subs)}')
 
-# Get subject split
 rng = np.random.RandomState(42)
 rng.shuffle(all_subs)
 
@@ -237,20 +251,12 @@ if len(all_subs) < total_needed:
 train_subs = all_subs[:args.subjects]
 test_subs = all_subs[args.subjects:args.subjects + args.test]
 
-# Load data once
 print(f'Loading {len(train_subs)}+{len(test_subs)} subjects...')
-X_all, y_all = load_windows(train_subs + test_subs, args.cache)
-subj_ids = []
-for s in train_subs:
-    d = np.load(os.path.join(args.cache, f'{s}.npz')); subj_ids.extend([s] * len(d['y']))
-for s in test_subs:
-    d = np.load(os.path.join(args.cache, f'{s}.npz')); subj_ids.extend([s] * len(d['y']))
-subj_ids = np.array(subj_ids)
+X_all, y_all, subj_all = load_windows(train_subs + test_subs, args.cache)
 
 if args.cv > 1:
-    # K-fold CV by subject
     print(f'\nRunning {args.cv}-fold subject-wise CV...')
-    unique_subs = np.unique(subj_ids)
+    unique_subs = np.unique(subj_all)
     rng.shuffle(unique_subs)
     fold_size = len(unique_subs) // args.cv
 
@@ -260,19 +266,14 @@ if args.cv > 1:
         t_end = (fold + 1) * fold_size if fold < args.cv - 1 else len(unique_subs)
         test_set = set(unique_subs[t_start:t_end])
         train_set = set(unique_subs) - test_set
+        tr_mask = np.array([s in train_set for s in subj_all])
+        te_mask = np.array([s in test_set for s in subj_all])
 
-        tr_mask = np.array([s in train_set for s in subj_ids])
-        te_mask = np.array([s in test_set for s in subj_ids])
-
-        result = train_fold(
-            X_all[tr_mask], y_all[tr_mask],
-            X_all[te_mask], y_all[te_mask],
-            fold_name=str(fold + 1),
-        )
+        result = train_fold(X_all[tr_mask], y_all[tr_mask], subj_all[tr_mask],
+                            X_all[te_mask], y_all[te_mask], fold_name=str(fold + 1))
         all_folds.append(result)
         print(f"  Fold {fold+1} Macro F1: {result['macro_f1']:.4f}")
 
-    # Summary
     print(f"\n{'='*60}")
     print("CROSS-VALIDATION RESULTS")
     print(f"{'='*60}")
@@ -286,12 +287,13 @@ if args.cv > 1:
           f"+- {np.std([f['macro_f1'] for f in all_folds])*100:.2f}%")
 
 else:
-    # Single run
     print(f'\nTraining: {args.subjects} subjects, {args.epochs} epochs')
-    tr_mask = np.array([s in set(train_subs) for s in subj_ids])
-    te_mask = np.array([s in set(test_subs) for s in subj_ids])
+    train_set = set(train_subs)
+    test_set = set(test_subs)
+    tr_mask = np.array([s in train_set for s in subj_all])
+    te_mask = np.array([s in test_set for s in subj_all])
 
-    result = train_fold(X_all[tr_mask], y_all[tr_mask],
+    result = train_fold(X_all[tr_mask], y_all[tr_mask], subj_all[tr_mask],
                         X_all[te_mask], y_all[te_mask])
 
     print(f"\n{'='*60}")
@@ -299,9 +301,9 @@ else:
     print(f"{'='*60}")
     print(f"Test Accuracy: {result['accuracy']*100:.2f}%")
     print(f"Macro F1:      {result['macro_f1']:.4f}")
-    print(f"W  F1: {result['W_f1']:.4f}  N1 F1: {result['N1_f1']:.4f}  "
-          f"N2 F1: {result['N2_f1']:.4f}  N3 F1: {result['N3_f1']:.4f}  "
-          f"REM F1: {result['REM_f1']:.4f}")
+    print(f"W  F1: {result['W_f1']:.4f}  N1 F1: {result['N1_f1']:.4f}")
+    print(f"N2 F1: {result['N2_f1']:.4f}  N3 F1: {result['N3_f1']:.4f}")
+    print(f"REM F1: {result['REM_f1']:.4f}")
     print('')
     print(classification_report(result['y_true'], result['y_pred'],
           target_names=['W','N1','N2','N3','REM'], digits=4, zero_division=0))
@@ -309,5 +311,4 @@ else:
     print(confusion_matrix(result['y_true'], result['y_pred']))
 
 print(f"\nModel saved: {args.save}")
-total_time = time.time() - (time.time() if False else 0)  # placeholder
 print(f"Done.")
