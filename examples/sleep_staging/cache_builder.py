@@ -14,7 +14,7 @@ import os, numpy as np
 from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
 from metabci.brainda.paradigms.sleep import SleepParadigm
 
-DATA_ROOT = r"D:\sleep eeg\sleep-edf-database-expanded-1.0.0\sleep-cassette"
+DATA_ROOT = r"F:\sleep-edf"
 CACHE_DIR = "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
