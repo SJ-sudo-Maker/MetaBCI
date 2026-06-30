@@ -272,20 +272,11 @@ def main():
     # ---- 1. Load model ----
     print("\n[1/5] Loading trained model...")
     raw_cls = lwmod.ParaSleep.module
-    # Auto-detect: use 3-channel for multi-head/3-ctx models, 1-channel for standard
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    # Check if it's a multi-head model
-    is_mh = any(k.startswith("head.heads.") for k in state.keys())
-    n_ch = 3  # our best models all use 3-epoch context
+    n_ch = 3  # 3-epoch context
 
-    if is_mh:
-        from metabci.brainda.algorithms.deep_learning.parasleep_mh import ParaSleepMH as ModelCls
-        model = ModelCls.module(n_channels=n_ch, n_samples=3000, n_classes=5).float()
-        model.load_state_dict(state)
-    else:
-        model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5).float()
-        # Handle missing/mismatched keys
-        model.load_state_dict(state, strict=False)
+    model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5).float()
+    model.load_state_dict(state, strict=False)
     model.eval()
     total_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {total_params:,}")
