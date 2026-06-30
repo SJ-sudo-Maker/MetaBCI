@@ -131,35 +131,42 @@ def _get_paradigm():
 # =============================================================================
 # Cache helpers
 # =============================================================================
+# Cache naming: {sub}_FpzCz_sr100_ctx{context}_{mode}_{label}.npz
+# Encodes channel, srate, context, mode, and label_mode to prevent
+# cross-experiment cache pollution.
 
-def cache_filename(sub, context, causal):
+def cache_filename(sub, context, causal, label_mode='5class'):
     mode = 'causal' if causal else 'center'
-    return f'{sub}_ctx{context}_{mode}.npz'
+    return f'{sub}_FpzCz_sr100_ctx{context}_{mode}_{label_mode}.npz'
 
-def cache_name_pattern(context, causal):
+def cache_name_suffix(context, causal, label_mode='5class'):
     mode = 'causal' if causal else 'center'
-    return f'_ctx{context}_{mode}.npz'
+    return f'_FpzCz_sr100_ctx{context}_{mode}_{label_mode}.npz'
 
-def find_cache(sub, cache_dir, context, causal):
-    """Try new naming first, fall back to old naming."""
-    path = os.path.join(cache_dir, cache_filename(sub, context, causal))
+def find_cache(sub, cache_dir, context, causal, label_mode='5class'):
+    """Try current naming, fall back to legacy patterns."""
+    path = os.path.join(cache_dir, cache_filename(sub, context, causal, label_mode))
     if os.path.exists(path):
         return path
-    # Fallback: old naming {sub}.npz (only valid for context=3 center)
+    # Fallback 1: old _ctx naming (no channel/srate/label)
+    old = os.path.join(cache_dir, f'{sub}_ctx{context}_{"causal" if causal else "center"}.npz')
+    if os.path.exists(old):
+        return old
+    # Fallback 2: ancient naming {sub}.npz (ctx=3 center only)
     if context == 3 and not causal:
-        path = os.path.join(cache_dir, f'{sub}.npz')
-        if os.path.exists(path):
-            return path
+        ancient = os.path.join(cache_dir, f'{sub}.npz')
+        if os.path.exists(ancient):
+            return ancient
     return None
 
-def load_cache_subjects(cache_dir, context, causal):
+def load_cache_subjects(cache_dir, context, causal, label_mode='5class'):
     if not os.path.isdir(cache_dir):
         return []
-    pattern = cache_name_pattern(context, causal)
+    suffix = cache_name_suffix(context, causal, label_mode)
     subs = []
     for f in os.listdir(cache_dir):
-        if f.endswith(pattern):
-            subs.append(f.replace(pattern, ''))
+        if f.endswith(suffix):
+            subs.append(f.replace(suffix, ''))
     return sorted(subs)
 
 def build_cache(data_root, cache_dir, context, causal):

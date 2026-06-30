@@ -24,11 +24,14 @@ parser.add_argument('--data', type=str, default=r'F:\sleep-edf')
 parser.add_argument('--cache', type=str, default='data_cache')
 parser.add_argument('--context', type=int, default=3)
 parser.add_argument('--causal', action='store_true')
+parser.add_argument('--label_mode', type=str, default='5class',
+                    choices=['5class', '4class', '3class'])
 args = parser.parse_args()
 
 assert args.context % 2 == 1, 'Context must be odd'
 mode = 'causal' if args.causal else 'center'
-pattern = f'_ctx{args.context}_{mode}.npz'
+# Cache naming: {sub}_FpzCz_sr100_ctx{context}_{mode}_{label}.npz
+suffix = f'_FpzCz_sr100_ctx{args.context}_{mode}_{args.label_mode}.npz'
 
 os.makedirs(args.cache, exist_ok=True)
 
@@ -37,7 +40,7 @@ paradigm = SleepParadigm(channels=["EEG Fpz-Cz"], srate=100)
 
 done, skipped = 0, 0
 for s in dataset.subjects:
-    path = os.path.join(args.cache, f"{s}{pattern}")
+    path = os.path.join(args.cache, f"{s}{suffix}")
     if os.path.exists(path):
         skipped += 1
         continue
@@ -68,5 +71,5 @@ for s in dataset.subjects:
     except (ValueError, RuntimeError) as e:
         print(f"  SKIP {s}: {e}")
 
-print(f"\nDone: {done} cached, {skipped} skipped (ctx={args.context} {mode})")
-print(f"Cache: {args.cache}/ (*{pattern})")
+print(f"\nDone: {done} cached, {skipped} skipped (ctx={args.context} {mode} {args.label_mode})")
+print(f"Cache: {args.cache}/ (*{suffix})")
