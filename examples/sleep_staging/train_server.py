@@ -209,11 +209,14 @@ def create_model():
     """Create model based on --model and --aux flags."""
     use_ta = (args.model == 'ta')
     use_aux = (args.aux == 'multitask')
+    # Causal context → target last epoch; center context → target middle epoch
+    target_idx = 'last' if (use_ta and args.causal) else 'center'
     raw_cls = lwmod.ParaSleep.module
     model = raw_cls(
         n_channels=args.context, n_samples=3000, n_classes=5,
         use_temporal_attention=use_ta,
         use_aux=use_aux,
+        target_index=target_idx,
     ).float()
     return model.to(DEVICE)
 

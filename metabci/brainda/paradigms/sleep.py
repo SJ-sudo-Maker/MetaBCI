@@ -127,6 +127,11 @@ class SleepParadigm(BaseParadigm):
 
         Xw = np.stack(Xw_list)  # (n_windows, context, n_samples)
         yw = np.array(yw_list, dtype=np.int64)
+
+        # Auto-remap labels if not 5class
+        if self.label_mode != "5class":
+            yw = self.map_labels(yw, self.label_mode)
+
         return Xw, yw
 
     # ------------------------------------------------------------------

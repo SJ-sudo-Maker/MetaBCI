@@ -227,17 +227,27 @@ class ParaSleep(nn.Module):
         Number of attention heads (TA mode only). Default 4.
     dim_feedforward : int
         Transformer FFN hidden dim (TA mode only). Default 128.
+    target_index : str
+        Which epoch to classify in TA mode.
+        "center" — middle epoch (C//2), for center context.
+        "last"   — last epoch (C-1), for causal context.
+        Default "center".
     """
 
     def __init__(self, n_channels: int, n_samples: int, n_classes: int,
                  use_temporal_attention: bool = False,
                  use_aux: bool = False,
                  d_model: int = 64, nhead: int = 4,
-                 dim_feedforward: int = 128):
+                 dim_feedforward: int = 128,
+                 target_index: str = "center"):
         super().__init__()
         self.use_temporal_attention = use_temporal_attention
         self.use_aux = use_aux
         self.n_epochs = n_channels  # same param, semantic depends on mode
+        self.target_index = target_index
+
+        if target_index not in ("center", "last"):
+            raise ValueError(f"target_index must be 'center' or 'last', got {target_index!r}")
 
         if use_temporal_attention:
             self._init_ta_architecture(
@@ -381,9 +391,12 @@ class ParaSleep(nn.Module):
         feats = feats + self.pos_embed[:, :C, :]     # (B, C, 64)
         feats = self.transformer(feats)              # (B, C, 64)
 
-        # Center epoch classification
-        center = C // 2
-        x = feats[:, center, :]                      # (B, 64)
+        # Target epoch classification
+        if self.target_index == "last":
+            idx = C - 1
+        else:
+            idx = C // 2
+        x = feats[:, idx, :]                         # (B, 64)
         x = self.dropout(x)
         out5 = self.fc(x)
 
@@ -407,7 +420,10 @@ class ParaSleep(nn.Module):
                 feats.append(f)
             feats = torch.stack(feats, dim=1)
             feats = feats + self.pos_embed[:, :C, :]
-            return self.transformer(feats)
+            feats = self.transformer(feats)
+            # Return target epoch features
+            idx = C - 1 if self.target_index == "last" else C // 2
+            return feats[:, idx, :]
 
         x = self.mrfe(X)
         x = self.bottleneck(x)
