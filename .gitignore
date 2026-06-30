@@ -158,3 +158,25 @@ cython_debug/
 .checkpoints
 /checkpoints
 .checkpoints/~.docx
+
+# Model checkpoints
+*.pth
+*.onnx
+*.ort
+
+# Cache directories
+data_cache/
+**/data_cache/
+
+# Demo outputs
+demo_outputs/
+**/demo_outputs/
+
+# Logs
+*.log
+
+# Superpowers / brainstorming artifacts
+docs/superpowers/
+
+# Doc generation scripts
+write_test_doc.py

@@ -9,7 +9,7 @@ from typing import Optional, List, Dict
 from collections import deque
 
 import numpy as np
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, lfilter, filtfilt
 
 from .workers import ProcessWorker
 
@@ -69,12 +69,18 @@ class SleepOnlineWorker(ProcessWorker):
         channel_name: str = "EEG Fpz-Cz",
         timeout: float = 1e-3,
         worker_name: str = "sleep_worker",
+        causal: bool = True,  # True=real-time lfilter, False=demo filtfilt
+        prefiltered: bool = False,  # True=data already filtered by paradigm
+        normalize: bool = False,    # True=Z-score (offline), False=raw µV (training)
     ):
         self.model = model
         self.srate = srate
         self.epoch_sec = epoch_sec
         self.epoch_samples = srate * epoch_sec
         self.channel_name = channel_name
+        self.causal = causal
+        self.prefiltered = prefiltered
+        self.normalize = normalize
 
         # Bandpass filter (0.5–40 Hz, 4th-order Butterworth)
         nyq = srate / 2.0
@@ -171,17 +177,25 @@ class SleepOnlineWorker(ProcessWorker):
             self._epoch_buffer.append(None)
             return
 
-        # Causal bandpass filter (lfilter — real-time safe, no future leakage)
-        if self._filter_zi is None:
-            self._filter_zi = np.zeros(max(len(self._b), len(self._a)) - 1)
-        eeg_filt, self._filter_zi = lfilter(
-            self._b, self._a, eeg, zi=self._filter_zi * eeg[0],
-        )
+        # Bandpass filter: skip if data is prefiltered by paradigm pipeline
+        if self.prefiltered:
+            eeg_filt = eeg  # data already filtered continuously (matching paradigm)
+        elif self.causal:
+            if self._filter_zi is None:
+                self._filter_zi = np.zeros(max(len(self._b), len(self._a)) - 1)
+            eeg_filt, self._filter_zi = lfilter(
+                self._b, self._a, eeg, zi=self._filter_zi * eeg[0],
+            )
+        else:
+            eeg_filt = filtfilt(self._b, self._a, eeg)
 
-        # Z-score normalize
-        mean = eeg_filt.mean()
-        std = eeg_filt.std() + 1e-8
-        eeg_norm = (eeg_filt - mean) / std
+        # Model was trained on raw µV (no Z-score). Normalize only if flag is set.
+        if self.normalize:
+            mean = eeg_filt.mean()
+            std = eeg_filt.std() + 1e-8
+            eeg_norm = (eeg_filt - mean) / std
+        else:
+            eeg_norm = eeg_filt
 
         # 3-epoch context buffer
         self._epoch_buffer.append(eeg_norm)

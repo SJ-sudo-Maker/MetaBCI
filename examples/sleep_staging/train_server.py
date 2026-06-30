@@ -1,11 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-ParaSleep server training — full-scale with subject-wise validation.
+ParaSleep server training — unified experiment runner.
+
+Supports all four improvement angles:
+  1. Causal context input (--causal, --context)
+  2. Lightweight temporal attention (--model ta)
+  3. N1-focused class imbalance (--sampler weighted)
+  4. Multi-task auxiliary training (--aux multitask)
 
 Usage:
-    python train_server.py                          # full training
-    python train_server.py --cv 5                   # 5-fold CV
-    python train_server.py --subjects 100 --epochs 150
+    # Angle 1: context comparison
+    python train_server.py --context 1
+    python train_server.py --context 3
+    python train_server.py --context 3 --causal
+    python train_server.py --context 5
+    python train_server.py --context 5 --causal
+
+    # Angle 3: sampler
+    python train_server.py --sampler weighted
+    python train_server.py --sampler weighted --label_smoothing 0
+
+    # Angle 2+4: final config
+    python train_server.py --model ta --context 5 --causal --sampler weighted --aux multitask
+
+    # Final 5-fold CV
+    python train_server.py --model ta --context 5 --causal --sampler weighted --aux multitask --cv 5
 """
 
 import sys, os, argparse, time
@@ -14,14 +33,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
 import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 
 
 # =============================================================================
-# Config (override via CLI args or edit below)
+# CLI
 # =============================================================================
 
 parser = argparse.ArgumentParser()
@@ -29,24 +48,51 @@ parser.add_argument('--data', type=str,
                     default=os.environ.get('SLEEP_DATA',
                     r'F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette'),
                     help='Path to sleep-cassette directory')
-parser.add_argument('--cache', type=str, default='data_cache',
+parser.add_argument('--cache', type=str, default=r'F:\sleep_cache',
                     help='Cache directory')
 parser.add_argument('--subjects', type=int, default=80, help='Train subjects')
 parser.add_argument('--test', type=int, default=10, help='Test subjects')
-parser.add_argument('--epochs', type=int, default=200)
+parser.add_argument('--epochs', type=int, default=150)
 parser.add_argument('--batch', type=int, default=128)
 parser.add_argument('--lr', type=float, default=1e-3)
+parser.add_argument('--wd', type=float, default=1.0, help='Weight decay')
 parser.add_argument('--context', type=int, default=3, help='Context window (odd)')
-parser.add_argument('--cv', type=int, default=5, help='K-fold CV (0=single run)')
+parser.add_argument('--causal', action='store_true',
+                    help='Causal (left-only) context window')
+parser.add_argument('--cv', type=int, default=0, help='K-fold CV (0=single run)')
 parser.add_argument('--save', type=str, default='parasleep_best.pth')
-parser.add_argument('--device', type=str, default='cuda',
-                    help='cuda / cpu')
+parser.add_argument('--device', type=str, default='cuda')
+
+# Angle 2: model variant
+parser.add_argument('--model', type=str, default='parasleep',
+                    choices=['parasleep', 'ta'],
+                    help='Model variant: parasleep (baseline) or ta (temporal attention)')
+
+# Angle 3: sampler & label smoothing
+parser.add_argument('--sampler', type=str, default='none',
+                    choices=['none', 'weighted'],
+                    help='Sampling strategy')
+parser.add_argument('--label_smoothing', type=float, default=0.05,
+                    help='Label smoothing (0=off)')
+
+# Angle 4: multi-task auxiliary
+parser.add_argument('--aux', type=str, default='none',
+                    choices=['none', 'multitask'],
+                    help='Auxiliary task mode')
+parser.add_argument('--lambda4', type=float, default=0.3,
+                    help='Weight for 4-class auxiliary loss')
+parser.add_argument('--lambda3', type=float, default=0.2,
+                    help='Weight for 3-class auxiliary loss')
+
 args = parser.parse_args()
 
 assert args.context % 2 == 1, 'Context window must be odd'
 DEVICE = args.device if torch.cuda.is_available() else 'cpu'
+MODE = 'causal' if args.causal else 'center'
 
 print(f"Device: {DEVICE} | Subjects: {args.subjects} | Epochs: {args.epochs}")
+print(f"Config: context={args.context} {MODE} | model={args.model} | "
+      f"sampler={args.sampler} | aux={args.aux}")
 print(f"Data: {args.data} | Cache: {args.cache}")
 
 
@@ -67,56 +113,109 @@ class FocalLoss(nn.Module):
 
 
 # =============================================================================
-# Data loading
+# Label mapping → delegated to SleepParadigm
 # =============================================================================
 
-def load_cache_subjects(cache_dir):
+from metabci.brainda.paradigms.sleep import SleepParadigm
+
+# Helper: create a lightweight paradigm instance for label mapping / cache building
+def _get_paradigm():
+    return SleepParadigm(
+        channels=['EEG Fpz-Cz'], srate=100,
+        context=args.context,
+        context_mode='causal' if args.causal else 'center',
+        label_mode='5class',
+    )
+
+
+# =============================================================================
+# Cache helpers
+# =============================================================================
+
+def cache_filename(sub, context, causal):
+    mode = 'causal' if causal else 'center'
+    return f'{sub}_ctx{context}_{mode}.npz'
+
+def cache_name_pattern(context, causal):
+    mode = 'causal' if causal else 'center'
+    return f'_ctx{context}_{mode}.npz'
+
+def find_cache(sub, cache_dir, context, causal):
+    """Try new naming first, fall back to old naming."""
+    path = os.path.join(cache_dir, cache_filename(sub, context, causal))
+    if os.path.exists(path):
+        return path
+    # Fallback: old naming {sub}.npz (only valid for context=3 center)
+    if context == 3 and not causal:
+        path = os.path.join(cache_dir, f'{sub}.npz')
+        if os.path.exists(path):
+            return path
+    return None
+
+def load_cache_subjects(cache_dir, context, causal):
     if not os.path.isdir(cache_dir):
         return []
-    return sorted([f.replace('.npz','') for f in os.listdir(cache_dir)
-                   if f.endswith('.npz')])
+    pattern = cache_name_pattern(context, causal)
+    subs = []
+    for f in os.listdir(cache_dir):
+        if f.endswith(pattern):
+            subs.append(f.replace(pattern, ''))
+    return sorted(subs)
 
-def build_cache(data_root, cache_dir):
-    if os.path.isdir(cache_dir) and len(load_cache_subjects(cache_dir)) > 0:
-        print(f"  Cache exists: {len(load_cache_subjects(cache_dir))} subjects")
+def build_cache(data_root, cache_dir, context, causal):
+    existing = load_cache_subjects(cache_dir, context, causal)
+    if len(existing) > 0:
+        print(f"  Cache exists: {len(existing)} subjects (ctx={context} {MODE})")
         return
 
-    print("  Building cache from raw EDF...")
+    print(f"  Building cache (ctx={context} {MODE}) from raw EDF...")
     from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
-    from metabci.brainda.paradigms.sleep import SleepParadigm
 
     os.makedirs(cache_dir, exist_ok=True)
     dataset = SleepEDFDataset(data_root, channel='EEG Fpz-Cz')
-    paradigm = SleepParadigm(channels=['EEG Fpz-Cz'], srate=100)
+    paradigm = _get_paradigm()
 
     for s in dataset.subjects:
-        path = os.path.join(cache_dir, f'{s}.npz')
+        path = os.path.join(cache_dir, cache_filename(s, context, causal))
         if os.path.exists(path):
             continue
         try:
-            X, y, _ = paradigm.get_data(dataset, subjects=[s], return_concat=True, n_jobs=1)
+            X, y, _ = paradigm.get_data(dataset, subjects=[s],
+                                         return_concat=True, n_jobs=1)
             X, y = X.astype(np.float32), y.astype(np.int64)
-            n = X.shape[0]; half = args.context // 2
-            Xw, yw = [], []
-            for i in range(half, n - half):
-                Xw.append(X[i-half:i+half+1, 0, :])
-                yw.append(y[i])
-            if Xw:
-                np.savez_compressed(path, X=np.stack(Xw), y=np.array(yw, dtype=np.int64))
+            Xw, yw = paradigm.build_windows(X, y)
+            np.savez_compressed(path, X=Xw, y=yw)
         except (ValueError, RuntimeError):
             pass
-    print(f"  Cache built: {len(load_cache_subjects(cache_dir))} subjects")
+    print(f"  Cache built: {len(load_cache_subjects(cache_dir, context, causal))} subjects")
 
 
-def load_windows(subjects, cache_dir):
+def load_windows(subjects, cache_dir, context, causal):
     X_list, y_list, subj_list = [], [], []
     for s in subjects:
-        p = os.path.join(cache_dir, f'{s}.npz')
-        if os.path.exists(p):
+        p = find_cache(s, cache_dir, context, causal)
+        if p is not None:
             d = np.load(p)
             X_list.append(d['X']); y_list.append(d['y'])
             subj_list.extend([s] * len(d['y']))
     return np.concatenate(X_list), np.concatenate(y_list), np.array(subj_list)
+
+
+# =============================================================================
+# Model factory
+# =============================================================================
+
+def create_model():
+    """Create model based on --model and --aux flags."""
+    use_ta = (args.model == 'ta')
+    use_aux = (args.aux == 'multitask')
+    raw_cls = lwmod.ParaSleep.module
+    model = raw_cls(
+        n_channels=args.context, n_samples=3000, n_classes=5,
+        use_temporal_attention=use_ta,
+        use_aux=use_aux,
+    ).float()
+    return model.to(DEVICE)
 
 
 # =============================================================================
@@ -127,7 +226,6 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
     global_start = time.time()
 
     # === Subject-wise validation split ===
-    # Same subject's epochs go entirely to train OR val — no leakage
     unique_subs = np.unique(subj_train)
     rng = np.random.RandomState(42)
     rng.shuffle(unique_subs)
@@ -141,81 +239,140 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
     X_tr, y_tr = X_train[tr_mask], y_train[tr_mask]
     X_val, y_val = X_train[val_mask], y_train[val_mask]
 
+    use_aux = (args.aux == 'multitask')
+
     print(f"\n  {'='*50}")
     print(f"  Fold {fold_name}")
     print(f"  Train: {X_tr.shape[0]} epochs ({len(tr_subs)} subjects)")
     print(f"  Val:   {X_val.shape[0]} epochs ({len(val_subs)} subjects)")
     print(f"  Test:  {X_test.shape[0]} epochs")
+    print(f"  Config: ctx={args.context} {MODE} | model={args.model} | "
+          f"sampler={args.sampler} | aux={args.aux}")
     print(f"  {'='*50}")
 
     tr_ds = TensorDataset(torch.from_numpy(X_tr), torch.from_numpy(y_tr))
     val_ds = TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val))
     te_ds = TensorDataset(torch.from_numpy(X_test), torch.from_numpy(y_test))
-    tr_loader = DataLoader(tr_ds, batch_size=args.batch, shuffle=True)
+
+    # Sampling strategy
+    if args.sampler == 'weighted':
+        class_count = np.bincount(y_tr, minlength=5)
+        sample_weights = 1.0 / (class_count[y_tr] + 1e-8)
+        sampler = WeightedRandomSampler(
+            weights=torch.DoubleTensor(sample_weights),
+            num_samples=len(sample_weights),
+            replacement=True,
+        )
+        tr_loader = DataLoader(tr_ds, batch_size=args.batch, sampler=sampler)
+        print(f"  Sampler: WeightedRandomSampler (class counts: {class_count.tolist()})")
+    else:
+        tr_loader = DataLoader(tr_ds, batch_size=args.batch, shuffle=True)
+
     val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False)
     te_loader = DataLoader(te_ds, batch_size=args.batch, shuffle=False)
 
-    # Class weights (computed from training set only)
+    # Class weights (from training set)
     _, counts = np.unique(y_tr, return_counts=True)
     raw = np.sqrt([len(y_tr) / c for c in counts])
     raw = np.clip(raw / raw.min(), 1.0, 10.0)
     cw = torch.tensor(raw, dtype=torch.float32).to(DEVICE)
     print(f"  Class weights: {raw.tolist()}")
+    print(f"  Label smoothing: {args.label_smoothing}")
 
     # Model
-    raw_cls = lwmod.ParaSleep.module
-    model = raw_cls(n_channels=args.context, n_samples=3000, n_classes=5).float().to(DEVICE)
-    focal = FocalLoss(gamma=2.0, weight=cw, label_smoothing=0.05)
-    opt = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1.0, betas=(0.9, 0.999))
-    sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+    model = create_model()
+    print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    best_val = 0; best_epoch = 0; train_losses = []; val_accs = []
+    focal5 = FocalLoss(gamma=2.0, weight=cw, label_smoothing=args.label_smoothing)
+    if use_aux:
+        focal4 = FocalLoss(gamma=2.0, weight=None, label_smoothing=0.0)
+        focal3 = FocalLoss(gamma=2.0, weight=None, label_smoothing=0.0)
+
+    opt = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd,
+                      betas=(0.9, 0.999))
+
+    # Three-stage LR: 1e-3 (1-10) → 1e-4 (11-130) → 1e-5 (131-150)
+    def adjust_lr(epoch):
+        if epoch <= 10:   return 1.0    # base_lr × 1.0  = 1e-3
+        elif epoch <= 130: return 0.1   # base_lr × 0.1  = 1e-4
+        else:              return 0.01  # base_lr × 0.01 = 1e-5
+    sched = optim.lr_scheduler.LambdaLR(opt, lr_lambda=adjust_lr)
+
+    # EMA
+    ema_avg = lambda avg, new: 0.999 * avg + 0.001 * new if avg is not None else new
+    ema_state = None
+
+    train_losses = []; val_accs = []
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         tr_loss = 0
         for Xb, yb in tr_loader:
             Xb, yb = Xb.to(DEVICE), yb.to(DEVICE)
-            out = model(Xb)
-            loss = focal(out, yb)
+
+            if use_aux:
+                out5, out4, out3 = model(Xb)
+                yb_np = yb.cpu().numpy()
+                y4 = torch.from_numpy(
+                    SleepParadigm.map_labels(yb_np, '4class')).to(DEVICE)
+                y3 = torch.from_numpy(
+                    SleepParadigm.map_labels(yb_np, '3class')).to(DEVICE)
+                loss = focal5(out5, yb) + args.lambda4 * focal4(out4, y4) \
+                       + args.lambda3 * focal3(out3, y3)
+            else:
+                out = model(Xb)
+                loss = focal5(out, yb)
+
             opt.zero_grad(); loss.backward(); opt.step()
             tr_loss += loss.item() * Xb.size(0)
         sched.step()
 
+        # Update EMA
+        if ema_state is None:
+            ema_state = {k: v.clone() for k, v in model.state_dict().items()}
+        else:
+            for k in ema_state:
+                ema_state[k] = ema_avg(ema_state[k], model.state_dict()[k].float())
+
+        # Validation (use 5-class output only)
         model.eval()
         all_vpred, all_vtrue = [], []
         with torch.no_grad():
             for Xb, yb in val_loader:
                 Xb, yb = Xb.to(DEVICE), yb.to(DEVICE)
-                all_vpred.append(model(Xb).argmax(1).cpu().numpy())
+                if use_aux:
+                    out, _, _ = model(Xb)
+                else:
+                    out = model(Xb)
+                all_vpred.append(out.argmax(1).cpu().numpy())
                 all_vtrue.append(yb.cpu().numpy())
         val_acc = (np.concatenate(all_vpred) == np.concatenate(all_vtrue)).mean()
-        # Macro F1 — equal weight to all 5 classes, not dominated by W
         val_f1 = f1_score(np.concatenate(all_vtrue), np.concatenate(all_vpred),
                           average='macro', zero_division=0)
 
         train_losses.append(tr_loss / len(X_tr))
         val_accs.append(val_acc)
 
-        if val_f1 > best_val:
-            best_val = val_f1; best_epoch = epoch
-            torch.save(model.state_dict(), args.save)
+        torch.save(ema_state, args.save)
 
         if epoch == 1 or epoch % 10 == 0:
             elapsed = time.time() - global_start
-            marker = " *" if val_f1 == best_val else ""
             print(f"  Epoch {epoch:3d}/{args.epochs} | loss={tr_loss/len(X_tr):.4f} | "
-                  f"val_f1={val_f1:.3f} | best_f1={best_val:.3f}@{best_epoch}{marker} | "
+                  f"val_f1={val_f1:.3f} | lr={opt.param_groups[0]['lr']:.1e} | "
                   f"{elapsed/60:.0f}min")
 
-    # Test
+    # Test with EMA weights
     state = torch.load(args.save, map_location=DEVICE, weights_only=True)
     model.load_state_dict(state); model.eval()
     all_p, all_t = [], []
     with torch.no_grad():
         for Xb, yb in te_loader:
             Xb = Xb.to(DEVICE)
-            all_p.append(model(Xb).argmax(1).cpu().numpy())
+            if use_aux:
+                out, _, _ = model(Xb)
+            else:
+                out = model(Xb)
+            all_p.append(out.argmax(1).cpu().numpy())
             all_t.append(yb.numpy())
     yp = np.concatenate(all_p); yt = np.concatenate(all_t)
 
@@ -236,11 +393,11 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
 # =============================================================================
 
 print('=' * 60)
-print('ParaSleep Server Training')
+print(f'ParaSleep Training — ctx={args.context} {MODE} | model={args.model}')
 print('=' * 60)
 
-build_cache(args.data, args.cache)
-all_subs = load_cache_subjects(args.cache)
+build_cache(args.data, args.cache, args.context, args.causal)
+all_subs = load_cache_subjects(args.cache, args.context, args.causal)
 print(f'Cached subjects: {len(all_subs)}')
 
 rng = np.random.RandomState(42)
@@ -255,7 +412,8 @@ train_subs = all_subs[:args.subjects]
 test_subs = all_subs[args.subjects:args.subjects + args.test]
 
 print(f'Loading {len(train_subs)}+{len(test_subs)} subjects...')
-X_all, y_all, subj_all = load_windows(train_subs + test_subs, args.cache)
+X_all, y_all, subj_all = load_windows(train_subs + test_subs, args.cache,
+                                       args.context, args.causal)
 
 if args.cv > 1:
     print(f'\nRunning {args.cv}-fold subject-wise CV...')

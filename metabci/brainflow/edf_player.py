@@ -101,8 +101,9 @@ class EDFSleepPlayer(BaseAmplifier):
                 self._log(f"  Channel not found, using: {pick[0]}")
 
         raw.pick(pick)
+        raw.filter(0.3, 45, verbose=False)   # match SleepEDFDataset
+        raw.filter(0.5, 40, verbose=False)   # match SleepParadigm sleep_preprocess_hook
         raw.resample(srate, verbose=False)
-
         self.data = raw.get_data().squeeze().astype(np.float64)
         self.n_samples = len(self.data)
         self.duration_sec = self.n_samples / srate

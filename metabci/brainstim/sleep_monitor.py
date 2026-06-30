@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-SleepMonitorUI: sleep report visualization for offline and real-time use.
+SleepMonitorUI: clinical-grade sleep report visualization.
 
-Displays hypnogram, stage distribution, and sleep statistics.
+Uses AASM-standard hypnogram layout with step-plot rendering.
 """
 
 from typing import Optional, List, Dict
@@ -12,43 +12,40 @@ import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+# ---- Chinese font support ----
+plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial']
+plt.rcParams['axes.unicode_minus'] = False
 
-# Stage colors (AASM convention)
+# ---- AASM standard clinical colors ----
 STAGE_COLORS = {
-    0: "#FF6B6B",  # W  — red
-    1: "#FFD93D",  # N1 — yellow
-    2: "#6BCB77",  # N2 — green
-    3: "#4D96FF",  # N3 — blue
-    4: "#9B59B6",  # R  — purple
+    0: "#E8E8E8",  # W   — light gray (wake)
+    1: "#A8D8EA",  # N1  — light blue
+    2: "#7EC8A8",  # N2  — green
+    3: "#3A6B9F",  # N3  — deep blue
+    4: "#C0392B",  # REM — red
 }
-
 STAGE_NAMES = ["W", "N1", "N2", "N3", "REM"]
-STAGE_NAMES_FULL = {
-    0: "Wake",
-    1: "N1 (Light)",
-    2: "N2 (Intermediate)",
-    3: "N3 (Deep)",
-    4: "REM",
-}
+
+# Y-axis: spaced positions for visual separation between stages
+STAGE_Y_POS = {0: 0.5, 1: 2.0, 2: 3.5, 3: 5.0, 4: 6.5}
 
 
-# ---------------------------------------------------------------------------
-# Core report generator (no GUI dependency)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Core hypnogram renderer (clinical step-plot style)
+# ===========================================================================
 
 def build_sleep_report(
     predictions: List[int],
     epoch_sec: int = 30,
     title: str = "Sleep Report",
 ) -> Figure:
-    """Generate a sleep report figure from a list of stage predictions.
+    """Generate a clinical-grade sleep report.
 
     Parameters
     ----------
     predictions : list of int
-        Sleep stage labels per epoch (0=W, 1=N1, 2=N2, 3=N3, 4=REM).
+        Sleep stage labels (0=W, 1=N1, 2=N2, 3=N3, 4=REM).
     epoch_sec : int
         Seconds per epoch (default 30).
     title : str
@@ -57,131 +54,123 @@ def build_sleep_report(
     Returns
     -------
     fig : matplotlib.figure.Figure
-        The completed report figure.
     """
     n_epochs = len(predictions)
     if n_epochs == 0:
         raise ValueError("Empty predictions list")
 
-    total_minutes = n_epochs * epoch_sec / 60
+    time_hours = np.arange(n_epochs + 1) * epoch_sec / 3600  # epoch boundaries
+    time_centers = (time_hours[:-1] + time_hours[1:]) / 2
+
+    # Map stages to spaced Y positions
+    y_data = np.array([STAGE_Y_POS[int(p)] for p in predictions])
+    y_bottom = np.array([STAGE_Y_POS[int(p)] - 0.5 for p in predictions])
+    y_top = np.array([STAGE_Y_POS[int(p)] + 0.5 for p in predictions])
+
+    # Stage stats
     stages_unique, counts = np.unique(predictions, return_counts=True)
     stage_count = {i: 0 for i in range(5)}
     for s, c in zip(stages_unique, counts):
         stage_count[int(s)] = c
 
-    # Derived metrics
-    sleep_onset_epochs = _find_sleep_onset(predictions)
-    sleep_latency_min = sleep_onset_epochs * epoch_sec / 60
-    sleep_period_epochs = n_epochs - sleep_onset_epochs
-    waso = sum(1 for i in range(sleep_onset_epochs, n_epochs)
-               if predictions[i] == 0) * epoch_sec / 60  # W after sleep onset
-
-    tst_min = (n_epochs - sleep_onset_epochs - waso * 60 / epoch_sec) * epoch_sec / 60
-    tst_min = max(0, tst_min)
-
-    sleep_efficiency = (
-        (tst_min / (total_minutes - sleep_latency_min) * 100)
-        if total_minutes > sleep_latency_min else 0
-    )
+    # Sleep metrics
+    sleep_onset = _find_sleep_onset(predictions)
+    latency_min = sleep_onset * epoch_sec / 60
+    total_min = n_epochs * epoch_sec / 60
+    tst_min = (n_epochs - sleep_onset) * epoch_sec / 60
+    efficiency = (tst_min / max(total_min - latency_min, 1)) * 100
 
     # ---- Build figure ----
-    fig = plt.figure(figsize=(14, 8))
+    fig = plt.figure(figsize=(16, 8), facecolor='white')
     gs = fig.add_gridspec(2, 2, width_ratios=[3, 1], height_ratios=[2, 1],
-                          hspace=0.35, wspace=0.3)
+                          hspace=0.35, wspace=0.25)
 
-    # (A) Hypnogram (top-left, spans full height)
-    ax_hypno = fig.add_subplot(gs[:, 0])
-    _draw_hypnogram(ax_hypno, predictions, epoch_sec, stage_count)
+    # (A) Hypnogram — clinical step-plot style
+    ax_hypno = fig.add_subplot(gs[:, 0], facecolor='#FAFAFA')
 
-    # (B) Stage distribution pie (top-right)
+    # Draw each epoch as a colored horizontal bar with clear boundaries
+    for i in range(n_epochs):
+        color = STAGE_COLORS.get(int(predictions[i]), "#888888")
+        ax_hypno.fill_between(
+            [time_hours[i], time_hours[i + 1]],
+            y_bottom[i], y_top[i],
+            color=color, alpha=0.95, edgecolor='white', linewidth=0.3,
+        )
+
+    # Y axis: AASM order with spacing
+    ax_hypno.set_yticks([STAGE_Y_POS[s] for s in range(5)])
+    ax_hypno.set_yticklabels(STAGE_NAMES, fontsize=10, fontweight='bold')
+    ax_hypno.set_ylim(-0.8, 7.8)
+    ax_hypno.invert_yaxis()
+    ax_hypno.set_ylabel("Sleep Stage", fontsize=11)
+
+    # X axis: hours with grid
+    max_h = time_hours[-1]
+    ax_hypno.set_xlim(0, max_h)
+    ax_hypno.set_xlabel("Time (hours)", fontsize=11)
+    ax_hypno.xaxis.set_major_locator(plt.MultipleLocator(1.0 if max_h > 3 else 0.5))
+    ax_hypno.xaxis.set_minor_locator(plt.MultipleLocator(0.5 if max_h > 3 else 0.25))
+    ax_hypno.grid(axis='x', which='major', color='#CCCCCC', linewidth=0.5, alpha=0.7)
+    ax_hypno.set_title(title, fontsize=14, fontweight='bold', pad=10)
+
+    # Duration annotation
+    dur_min = n_epochs * epoch_sec / 60
+    info = (f"Total: {dur_min:.0f} min  |  "
+            f"Sleep Latency: {latency_min:.0f} min  |  "
+            f"TST: {tst_min:.0f} min  |  "
+            f"Efficiency: {efficiency:.0f}%")
+    ax_hypno.text(0.5, -0.08, info, transform=ax_hypno.transAxes, ha="center",
+                  fontsize=9, color="#555555")
+
+    # (B) Stage distribution pie
     ax_pie = fig.add_subplot(gs[0, 1])
     _draw_stage_pie(ax_pie, stage_count, n_epochs)
 
-    # (C) Metrics table (bottom-right)
+    # (C) Metrics table
     ax_table = fig.add_subplot(gs[1, 1])
     ax_table.axis("off")
-    _draw_metrics_table(ax_table, total_minutes, sleep_latency_min,
-                        tst_min, sleep_efficiency, stage_count, n_epochs, epoch_sec)
+    _draw_metrics_table(ax_table, total_min, latency_min, tst_min,
+                        efficiency, stage_count, n_epochs, epoch_sec)
 
-    fig.suptitle(title, fontsize=16, fontweight="bold", y=0.98)
     return fig
 
 
+# ===========================================================================
+# Helpers
+# ===========================================================================
+
 def _find_sleep_onset(predictions: List[int]) -> int:
-    """First epoch of 3 consecutive non-Wake epochs (standard definition)."""
+    """First epoch of 3 consecutive non-Wake epochs."""
     for i in range(len(predictions) - 2):
         if all(p != 0 for p in predictions[i:i + 3]):
             return i
     return 0
 
 
-def _draw_hypnogram(ax, predictions, epoch_sec, stage_count):
-    """Draw sleep stage hypnogram."""
-    n = len(predictions)
-    time_axis = np.arange(n) * epoch_sec / 3600  # hours
-
-    # Draw as filled regions
-    prev = 0
-    for e in range(n):
-        color = STAGE_COLORS.get(int(predictions[e]), "#888888")
-        ax.fill_between([time_axis[prev], time_axis[min(e + 1, n - 1)]],
-                        5.5, -0.5, color=color, alpha=0.85)
-        prev = e
-
-    ax.set_yticks([0, 1, 2, 3, 4])
-    ax.set_yticklabels(["W", "N1", "N2", "N3", "REM"])
-    ax.set_ylim(-0.5, 5.5)
-    ax.invert_yaxis()
-    ax.set_xlabel("Time (hours)")
-    ax.set_ylabel("Sleep Stage")
-    ax.set_title("Hypnogram", fontweight="bold")
-
-    # Duration annotation
-    dur_min = n * epoch_sec / 60
-    info = (f"Total: {dur_min:.0f} min | "
-            f"W: {stage_count[0]} | REM: {stage_count[4]} | "
-            f"N1+N2+N3: {stage_count[1]+stage_count[2]+stage_count[3]}")
-    ax.text(0.5, -0.12, info, transform=ax.transAxes, ha="center",
-            fontsize=8, color="gray")
-
-    # Grid
-    ax.grid(axis="x", alpha=0.3)
-
-
 def _draw_stage_pie(ax, stage_count, n_epochs):
-    """Draw stage distribution pie chart."""
-    labels = []
-    sizes = []
-    colors = []
+    labels, sizes, colors = [], [], []
     for i in range(5):
         if stage_count[i] > 0:
             labels.append(f"{STAGE_NAMES[i]} ({100*stage_count[i]/n_epochs:.1f}%)")
             sizes.append(stage_count[i])
             colors.append(STAGE_COLORS[i])
-
-    wedges, texts, autotexts = ax.pie(
-        sizes, labels=None, colors=colors, autopct="%1.1f%%",
-        startangle=90, pctdistance=0.6,
-        textprops={"fontsize": 9},
-    )
+    wedges, _, _ = ax.pie(sizes, labels=None, colors=colors, autopct="%1.1f%%",
+                           startangle=90, pctdistance=0.6, textprops={"fontsize": 9})
     ax.legend(wedges, labels, loc="lower center", ncol=2, fontsize=8)
     ax.set_title("Stage Distribution", fontweight="bold")
 
 
 def _draw_metrics_table(ax, total_min, latency_min, tst_min,
                         efficiency, stage_count, n_epochs, epoch_sec):
-    """Draw sleep metrics summary table."""
-    # Calculate percentages
     n1_pct = 100 * stage_count[1] / max(n_epochs, 1)
     n3_pct = 100 * stage_count[3] / max(n_epochs, 1)
     rem_pct = 100 * stage_count[4] / max(n_epochs, 1)
-
     nrem_min = (stage_count[1] + stage_count[2] + stage_count[3]) * epoch_sec / 60
 
     metrics = [
         ("Recording Duration", f"{total_min:.1f} min"),
         ("Sleep Latency", f"{latency_min:.1f} min"),
-        ("Total Sleep Time (TST)", f"{tst_min:.1f} min"),
+        ("Total Sleep Time", f"{tst_min:.1f} min"),
         ("Sleep Efficiency", f"{efficiency:.1f}%"),
         ("", ""),
         ("NREM Sleep", f"{nrem_min:.1f} min"),
@@ -193,65 +182,35 @@ def _draw_metrics_table(ax, total_min, latency_min, tst_min,
 
     ax.text(0.5, 0.95, "Sleep Metrics", transform=ax.transAxes,
             fontsize=11, fontweight="bold", ha="center", va="top")
-
     y = 0.82
     for label, value in metrics:
         if label:
-            ax.text(0.05, y, label, transform=ax.transAxes,
-                    fontsize=9, va="top")
-            ax.text(0.95, y, value, transform=ax.transAxes,
-                    fontsize=9, va="top", ha="right", fontweight="bold",
-                    color="#2C3E50")
+            ax.text(0.05, y, label, transform=ax.transAxes, fontsize=9, va="top")
+            ax.text(0.95, y, value, transform=ax.transAxes, fontsize=9, va="top",
+                    ha="right", fontweight="bold", color="#2C3E50")
         y -= 0.075
 
 
-# ---------------------------------------------------------------------------
-# Real-time monitor (non-blocking window)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Real-time monitor
+# ===========================================================================
 
 class SleepMonitorUI:
-    """Real-time sleep stage monitor window.
+    """Real-time clinical sleep stage monitor.
 
-    Opens a matplotlib window that updates as new predictions arrive.
-    Suitable for integration with SleepOnlineWorker or offline playback.
-
-    Parameters
-    ----------
-    epoch_sec : int
-        Seconds per epoch (default 30).
-    title : str
-        Window title.
-
-    Examples
-    --------
-    >>> monitor = SleepMonitorUI()
-    >>> monitor.open()
-    >>> for stage in [0, 0, 2, 2, 3, 3, 4, 2]:  # streaming predictions
-    ...     monitor.update(stage)
-    ...     time.sleep(0.1)  # simulate real-time
-    >>> monitor.close()
+    Opens a window that updates as new predictions arrive.
     """
 
     def __init__(self, epoch_sec: int = 30,
-                 title: str = "Sleep Monitor — MetaBCI"):
+                 title: str = "MetaBCI Sleep Monitor"):
         self.epoch_sec = epoch_sec
         self.title = title
         self.predictions: List[int] = []
         self._fig: Optional[Figure] = None
-        self._ani = None
-
-    # ---- Public API ----
 
     def open(self, block: bool = False):
-        """Open the monitor window.
-
-        Parameters
-        ----------
-        block : bool
-            If True, blocks until window is closed. Default False (non-blocking).
-        """
         plt.ion()
-        self._fig = plt.figure(figsize=(12, 5))
+        self._fig = plt.figure(figsize=(14, 5), facecolor='white')
         self._fig.canvas.manager.set_window_title(self.title)
         self._render_empty()
         if block:
@@ -261,13 +220,6 @@ class SleepMonitorUI:
             plt.pause(0.1)
 
     def update(self, stage: int):
-        """Push a new sleep stage prediction (0-4) and refresh the display.
-
-        Parameters
-        ----------
-        stage : int
-            Sleep stage: 0=W, 1=N1, 2=N2, 3=N3, 4=REM.
-        """
         if stage not in range(5):
             raise ValueError(f"Stage must be 0-4, got {stage}")
         self.predictions.append(stage)
@@ -277,102 +229,144 @@ class SleepMonitorUI:
             self._fig.canvas.flush_events()
 
     def close(self):
-        """Close the monitor window."""
         if self._fig is not None:
             plt.close(self._fig)
             self._fig = None
         plt.ioff()
 
     def save(self, path: str):
-        """Save the current report to a file (PNG/PDF/SVG).
-
-        Parameters
-        ----------
-        path : str
-            Output file path. Extension determines format.
-        """
         fig = build_sleep_report(self.predictions, self.epoch_sec,
                                  title=self.title)
         fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    # ---- Internal ----
-
     def _render_empty(self):
-        """Render initial empty state."""
         if self._fig is None:
             return
         self._fig.clear()
         ax = self._fig.add_subplot(111)
-        ax.text(0.5, 0.5, "Waiting for data...\n\n"
-                "SleepOnlineWorker will push predictions here.",
+        ax.text(0.5, 0.5, "Waiting for data...",
                 transform=ax.transAxes, ha="center", va="center",
                 fontsize=14, color="gray")
         ax.axis("off")
         self._fig.canvas.draw_idle()
 
     def _render_current(self):
-        """Render current hypnogram in the monitor window."""
         if self._fig is None or len(self.predictions) == 0:
             return
         self._fig.clear()
-
         n = len(self.predictions)
-        time_axis = np.arange(n) * self.epoch_sec / 60  # minutes
+        time_hours = np.arange(n + 1) * self.epoch_sec / 3600
         total_min = n * self.epoch_sec / 60
 
-        ax = self._fig.add_subplot(111)
+        ax = self._fig.add_subplot(111, facecolor='#FAFAFA')
+
         for i in range(n):
             color = STAGE_COLORS.get(int(self.predictions[i]), "#888888")
+            yb = STAGE_Y_POS[int(self.predictions[i])] - 0.5
+            yt = STAGE_Y_POS[int(self.predictions[i])] + 0.5
             ax.fill_between(
-                [time_axis[i], time_axis[min(i + 1, n - 1)]],
-                5.5, -0.5, color=color, alpha=0.85,
+                [time_hours[i], time_hours[i + 1]], yb, yt,
+                color=color, alpha=0.95, edgecolor='white', linewidth=0.3,
             )
 
-        # Latest stage indicator
+        ax.set_yticks([STAGE_Y_POS[s] for s in range(5)])
+        ax.set_yticklabels(STAGE_NAMES, fontsize=10, fontweight='bold')
+        ax.set_ylim(-0.8, 7.8)
+        ax.invert_yaxis()
+        ax.set_xlim(0, max(time_hours[-1], 0.01))
+        ax.set_xlabel("Time (hours)", fontsize=11)
+        ax.set_ylabel("Sleep Stage", fontsize=11)
+        ax.grid(axis='x', which='major', color='#CCCCCC', linewidth=0.5, alpha=0.7)
+
+        # Current stage indicator
         latest = int(self.predictions[-1])
         ax.text(0.99, 0.95, f"Current: {STAGE_NAMES[latest]}",
                 transform=ax.transAxes, ha="right", va="top",
-                fontsize=14, fontweight="bold",
-                color=STAGE_COLORS[latest],
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
-                         alpha=0.9))
+                fontsize=14, fontweight="bold", color=STAGE_COLORS[latest],
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9))
 
-        ax.set_yticks([0, 1, 2, 3, 4])
-        ax.set_yticklabels(["W", "N1", "N2", "N3", "REM"])
-        ax.set_ylim(-0.5, 5.5)
-        ax.invert_yaxis()
-        ax.set_xlabel("Time (minutes)")
-        ax.set_ylabel("Sleep Stage")
-        ax.set_title(f"{self.title} — {total_min:.0f} min recorded",
-                     fontweight="bold")
-        ax.grid(axis="x", alpha=0.3)
+        ax.set_title(f"{self.title}  —  {total_min:.0f} min",
+                     fontsize=12, fontweight="bold")
+        plt.tight_layout()
 
 
-# ---------------------------------------------------------------------------
-# Quick command-line report
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Convenience
+# ===========================================================================
 
 def generate_report(
-    predictions: List[int],
-    output_path: str,
-    epoch_sec: int = 30,
-    title: str = "Sleep Report",
+    predictions: List[int], output_path: str,
+    epoch_sec: int = 30, title: str = "Sleep Report",
 ):
-    """Generate and save a sleep report from predictions.
-
-    Parameters
-    ----------
-    predictions : list of int
-        Sleep stage labels (0=W, 1=N1, 2=N2, 3=N3, 4=REM).
-    output_path : str
-        File path for the report image (e.g. "report.png").
-    epoch_sec : int
-        Seconds per epoch.
-    title : str
-        Report title.
-    """
+    """Save a clinical sleep report to file."""
     fig = build_sleep_report(predictions, epoch_sec, title)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Report saved to: {output_path}")
+
+
+# ===========================================================================
+# brainstim Experiment-compatible paradigm (uses framework.py)
+# ===========================================================================
+
+def sleep_report_paradigm(win, predictions=None, epoch_sec=30):
+    """Render sleep hypnogram in a PsychoPy window — compatible with
+    brainstim's Experiment.register_paradigm().
+
+    Usage:
+        ex = Experiment(win_size=(1400, 800))
+        ex.register_paradigm("Sleep Report", sleep_report_paradigm,
+                            predictions=[0,0,2,2,3,3,4,2,...])
+        ex.run()
+    """
+    from psychopy import visual, event, core
+
+    if predictions is None or len(predictions) == 0:
+        text = visual.TextStim(win, "No predictions available.",
+                               color="white", height=30)
+        text.draw(); win.flip(); core.wait(1); return
+
+    n = len(predictions)
+    time_hours = np.arange(n) * epoch_sec / 3600
+    max_h = max(time_hours[-1], 1)
+    bar_width = max_h / max(n, 1) * win.size[0] * 0.9
+
+    # Background
+    bg = visual.Rect(win, width=win.size[0], height=win.size[1],
+                     fillColor="#FAFAFA", lineColor=None)
+    bg.draw()
+
+    # Title
+    title = visual.TextStim(win, "Sleep Report — MetaBCI",
+                            pos=(0, win.size[1] / 2 - 30),
+                            color="#333333", height=28, bold=True)
+    title.draw()
+
+    # Y-axis labels
+    for stage_id, (name, y_pos) in enumerate(zip(STAGE_NAMES, [0, -60, -120, -180, -240])):
+        label = visual.TextStim(win, name, pos=(-win.size[0] / 2 + 50, y_pos),
+                                color=STAGE_COLORS[stage_id], height=22, bold=True)
+        label.draw()
+
+    # Draw hypnogram bars
+    bar_h = 30
+    for i in range(n):
+        color = STAGE_COLORS.get(int(predictions[i]), "#888888")
+        x_pos = -win.size[0] / 2 + 70 + (i + 0.5) * bar_width
+        y_pos = -int(predictions[i]) * 60
+        rect = visual.Rect(win, width=bar_width, height=bar_h,
+                           pos=(x_pos, y_pos),
+                           fillColor=color, lineColor=color, lineWidth=1)
+        rect.draw()
+
+    # Time axis
+    for h in range(int(max_h) + 1):
+        x_pos = -win.size[0] / 2 + 70 + (h / max_h) * (n * bar_width)
+        tick = visual.TextStim(win, f"{h}h", pos=(x_pos, -win.size[1] / 2 + 40),
+                               color="#666666", height=16)
+        tick.draw()
+
+    win.flip()
+    core.wait(3)  # display for 3 seconds
+    event.clearEvents()
