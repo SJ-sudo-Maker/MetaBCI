@@ -180,10 +180,13 @@ if DEMO_MODE == "cache":
     print("Done.")
     exit()
 
+# EDF mode: use center context for demo (set causal=True if model trained with --causal)
+DEMO_CAUSAL = False
 player = EDFSleepPlayer(edf, channel="EEG Fpz-Cz", srate=100,
                         hypnogram_path=hyp, speed=SPEED, chunk_size=3000,
                         verbose=False)
-worker = SleepOnlineWorker(model=model, srate=100, epoch_sec=30, causal=False, prefiltered=True)
+worker = SleepOnlineWorker(model=model, srate=100, epoch_sec=30,
+                            causal=DEMO_CAUSAL, prefiltered=True)
 
 # (bypass worker registration — consume directly in main thread)
 

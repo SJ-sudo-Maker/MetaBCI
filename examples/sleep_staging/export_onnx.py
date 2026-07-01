@@ -265,30 +265,36 @@ def main():
                         help="Path to sleep-edf data root (fallback)")
     parser.add_argument("--skip-quantize", action="store_true",
                         help="Skip INT8 quantization (FP32 only)")
+    parser.add_argument("--causal", action="store_true",
+                        help="Use causal context (for models trained with --causal)")
     parser.add_argument("--verify", type=int, default=5,
                         help="Number of test subjects for verification (default: 5)")
     args = parser.parse_args()
+
+    mode_str = 'causal' if args.causal else 'center'
 
     print("=" * 60)
     print("ParaSleep ONNX Export + INT8 Quantization")
     print("=" * 60)
 
     # ---- 1. Load model ----
-    print("\n[1/5] Loading trained model...")
+    print(f"\n[1/5] Loading trained model (ctx={args.context} {mode_str})...")
     raw_cls = lwmod.ParaSleep.module
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    n_ch = int(args.context)  # context window from CLI
+    n_ch = int(args.context)
 
     # Auto-detect architecture
     use_ta = any(k.startswith('transformer.') for k in state.keys())
+    target_idx = 'last' if (use_ta and args.causal) else 'center'
     arch = 'TA' if use_ta else 'Base'
 
     model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5,
-                    use_temporal_attention=use_ta).float()
+                    use_temporal_attention=use_ta,
+                    target_index=target_idx).float()
     model.load_state_dict(state, strict=False)
     model.eval()
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"  Architecture: {arch} | Parameters: {total_params:,}")
+    print(f"  Architecture: {arch} | target_index: {target_idx} | Params: {total_params:,}")
 
     # ---- 2. Load calibration data (from cache if available) ----
     print("\n[2/5] Loading calibration data...")
@@ -296,6 +302,8 @@ def main():
     cache_dir = args.cache
     # Try new naming first, fall back to old patterns
     patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode_str}_5class.npz',
+        f'*_ctx{args.context}_{mode_str}.npz',
         f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
         f'*_ctx{args.context}_center.npz',
         '*.npz',

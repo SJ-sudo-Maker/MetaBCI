@@ -9,7 +9,7 @@ from typing import Optional, List, Dict
 from collections import deque
 
 import numpy as np
-from scipy.signal import butter, lfilter, filtfilt
+from scipy.signal import butter, lfilter, lfilter_zi, filtfilt
 
 from .workers import ProcessWorker
 
@@ -72,6 +72,7 @@ class SleepOnlineWorker(ProcessWorker):
         causal: bool = True,  # True=real-time lfilter, False=demo filtfilt
         prefiltered: bool = False,  # True=data already filtered by paradigm
         normalize: bool = False,    # True=Z-score (offline), False=raw µV (training)
+        context: int = 3,           # number of epochs in context window
     ):
         self.model = model
         self.srate = srate
@@ -81,14 +82,15 @@ class SleepOnlineWorker(ProcessWorker):
         self.causal = causal
         self.prefiltered = prefiltered
         self.normalize = normalize
+        self.context = context
 
         # Bandpass filter (0.5–40 Hz, 4th-order Butterworth)
         nyq = srate / 2.0
         self._b, self._a = butter(4, [0.5 / nyq, 40.0 / nyq], btype="band")
         self._filter_zi = None  # continuous filter state (lfilter)
 
-        # 3-epoch context buffer (for windowed inference)
-        self._epoch_buffer = deque(maxlen=3)
+        # Context epoch buffer (configurable size)
+        self._epoch_buffer = deque(maxlen=context)
 
         # Sleep stage history
         self.stage_names = ["W", "N1", "N2", "N3", "REM"]
@@ -182,9 +184,9 @@ class SleepOnlineWorker(ProcessWorker):
             eeg_filt = eeg  # data already filtered continuously (matching paradigm)
         elif self.causal:
             if self._filter_zi is None:
-                self._filter_zi = np.zeros(max(len(self._b), len(self._a)) - 1)
+                self._filter_zi = lfilter_zi(self._b, self._a) * eeg[0]
             eeg_filt, self._filter_zi = lfilter(
-                self._b, self._a, eeg, zi=self._filter_zi * eeg[0],
+                self._b, self._a, eeg, zi=self._filter_zi,
             )
         else:
             eeg_filt = filtfilt(self._b, self._a, eeg)
@@ -197,12 +199,12 @@ class SleepOnlineWorker(ProcessWorker):
         else:
             eeg_norm = eeg_filt
 
-        # 3-epoch context buffer
+        # Context epoch buffer
         self._epoch_buffer.append(eeg_norm)
-        if len(self._epoch_buffer) < 3:
-            # Not enough context yet — skip or predict from partial buffer
+        if len(self._epoch_buffer) < self.context:
+            # Not enough context yet — skip
             print(f"[SleepWorker] epoch {self.epoch_counter+1:4d} | "
-                  f"buffering ({len(self._epoch_buffer)}/3)...")
+                  f"buffering ({len(self._epoch_buffer)}/{self.context})...")
             self.epoch_counter += 1
             self.predictions.append(-1)
             return
@@ -213,13 +215,9 @@ class SleepOnlineWorker(ProcessWorker):
             self.predictions.append(-1)
             return
 
-        # Stack 3 epochs as channels: (1, 3, 3000)
-        ctx = np.stack([
-            self._epoch_buffer[0],
-            self._epoch_buffer[1],
-            self._epoch_buffer[2],
-        ], axis=0)
-        x = torch.from_numpy(ctx).float().unsqueeze(0)  # (1, 3, 3000)
+        # Stack context epochs as channels: (1, context, 3000)
+        ctx = np.stack(list(self._epoch_buffer), axis=0)
+        x = torch.from_numpy(ctx).float().unsqueeze(0)  # (1, context, 3000)
 
         # Inference
         with torch.no_grad():
