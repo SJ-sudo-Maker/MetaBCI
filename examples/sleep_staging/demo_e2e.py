@@ -6,7 +6,8 @@ Usage
 -----
     python demo_e2e.py
 
-Requires a trained ParaSleep model at MODEL_PATH (default: parasleep.pth).
+Requires a trained ParaSleep model at MODEL_PATH (default: parasleep_best.pth).
+Set DEMO_CONTEXT to match the model's training context window size.
 """
 
 import sys
@@ -26,7 +27,6 @@ plt.rcParams['axes.unicode_minus'] = False
 
 from metabci.brainflow.edf_player import EDFSleepPlayer
 from metabci.brainflow.sleep_worker import SleepOnlineWorker
-# (no Marker needed — we handle epochs directly)
 from metabci.brainstim.sleep_monitor import STAGE_COLORS, STAGE_NAMES, STAGE_Y_POS
 import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 
@@ -41,6 +41,9 @@ SPEED = 300.0                          # 300x real-time for quick demo
 MAX_EPOCHS = 720                       # show 6 hours
 SUBJECT = None                         # None = auto-pick first available
 DEMO_MODE = "cache"                    # "cache" = pre-built npz (best), "edf" = raw EDF playback
+DEMO_CONTEXT = 3                       # context window size (must match training)
+DEMO_CAUSAL = False                    # True if model trained with --causal
+MODE_STR = 'causal' if DEMO_CAUSAL else 'center'
 
 # =============================================================================
 # Setup
@@ -51,17 +54,23 @@ if DEMO_MODE == "cache":
     import glob as _glob
     cache_dir = "data_cache" if os.path.isdir("data_cache") else r"F:\sleep_cache"
     # Try new naming first, fall back to old patterns
-    for pat in ['*_FpzCz_sr100_ctx3_center_5class.npz', '*_ctx3_center.npz', '*.npz']:
-        subs = sorted([f.replace('_FpzCz_sr100_ctx3_center_5class.npz','').replace('_ctx3_center.npz','').replace('.npz','')
-                       for f in _glob.glob(os.path.join(cache_dir, pat))])
-        if subs:
+    ctx = DEMO_CONTEXT
+    for pat in [f'*_FpzCz_sr100_ctx{ctx}_{MODE_STR}_5class.npz',
+                f'*_ctx{ctx}_{MODE_STR}.npz',
+                f'*_FpzCz_sr100_ctx{ctx}_center_5class.npz',
+                f'*_ctx{ctx}_center.npz',
+                '*.npz']:
+        matches = _glob.glob(os.path.join(cache_dir, pat))
+        if matches:
             break
-    sub = subs[0]  # auto-pick first available subject
-    print(f"Cache mode: subject {sub}")
+    sub = os.path.basename(matches[0]).rsplit('_', 1)[0].split('_')[0] if matches else '4032'
+    print(f"Cache mode: subject {sub} (ctx={ctx} {MODE_STR})")
     # Find cache file with fallback
     cache_path = None
-    for fmt in [os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx3_center_5class.npz'),
-                os.path.join(cache_dir, f'{sub}_ctx3_center.npz'),
+    for fmt in [os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_{MODE_STR}_5class.npz'),
+                os.path.join(cache_dir, f'{sub}_ctx{ctx}_{MODE_STR}.npz'),
+                os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class.npz'),
+                os.path.join(cache_dir, f'{sub}_ctx{ctx}_center.npz'),
                 os.path.join(cache_dir, f'{sub}.npz')]:
         if os.path.exists(fmt):
             cache_path = fmt
@@ -82,7 +91,7 @@ if DEMO_MODE == "cache":
     player = None
     hyp = None
 else:
-    # Original EDF playback mode (unchanged)
+    # Original EDF playback mode
     DATA_ROOT = r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette"
     files = sorted(os.listdir(DATA_ROOT))
     SKIP = 120
@@ -107,18 +116,27 @@ else:
 # Load model (auto-detect architecture from checkpoint)
 if os.path.exists(MODEL_PATH):
     state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-    # Detect TA architecture from state dict
+    # Auto-detect architecture and context from state dict
     use_ta = any(k.startswith('transformer.') for k in state.keys())
+    # Detect context from checkpoint
+    if use_ta and 'pos_embed' in state:
+        n_ch = state['pos_embed'].shape[1]
+    elif 'mrfe.small_branch.dsconv.dw.weight' in state:
+        n_ch = state['mrfe.small_branch.dsconv.dw.weight'].shape[0]
+    else:
+        n_ch = DEMO_CONTEXT
+    target_idx = 'last' if (use_ta and DEMO_CAUSAL) else 'center'
     raw_cls = lwmod.ParaSleep.module
-    model = raw_cls(n_channels=3, n_samples=3000, n_classes=5,
-                    use_temporal_attention=use_ta).float()
+    model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5,
+                    use_temporal_attention=use_ta,
+                    target_index=target_idx).float()
     model.load_state_dict(state, strict=False)
     arch = 'TA' if use_ta else 'Base'
-    print(f"Model: loaded ({arch}, {sum(p.numel() for p in model.parameters()):,} params)")
+    print(f"Model: loaded ({arch}, ctx={n_ch}, {sum(p.numel() for p in model.parameters()):,} params)")
 else:
     print("Model: WARNING — using untrained model (random predictions)!")
     raw_cls = lwmod.ParaSleep.module
-    model = raw_cls(n_channels=3, n_samples=3000, n_classes=5).float()
+    model = raw_cls(n_channels=DEMO_CONTEXT, n_samples=3000, n_classes=5).float()
 
 model.eval()
 
@@ -169,7 +187,6 @@ if DEMO_MODE == "cache":
         plt.tight_layout(); plt.pause(0.02)
 
     plt.ioff(); plt.close()
-    # Print final report
     from collections import Counter
     cnt = Counter(preds_all.tolist())
     print(f"\nFinal predictions: W={cnt.get(0,0)} N1={cnt.get(1,0)} N2={cnt.get(2,0)} N3={cnt.get(3,0)} REM={cnt.get(4,0)}")
@@ -180,13 +197,13 @@ if DEMO_MODE == "cache":
     print("Done.")
     exit()
 
-# EDF mode: use center context for demo (set causal=True if model trained with --causal)
-DEMO_CAUSAL = False
+# EDF mode
 player = EDFSleepPlayer(edf, channel="EEG Fpz-Cz", srate=100,
                         hypnogram_path=hyp, speed=SPEED, chunk_size=3000,
                         verbose=False)
 worker = SleepOnlineWorker(model=model, srate=100, epoch_sec=30,
-                            causal=DEMO_CAUSAL, prefiltered=True)
+                           causal=DEMO_CAUSAL, prefiltered=True,
+                           context=DEMO_CONTEXT)
 
 # (bypass worker registration — consume directly in main thread)
 
@@ -216,12 +233,11 @@ fig.canvas.manager.set_window_title("MetaBCI Sleep Monitor — Live Demo")
 
 epoch_sec = 30
 stages_display = []
-worker.pre()                                 # init model + LSL
+worker.pre()
 
 player._exit.clear()
 start = time.perf_counter()
 
-# Accumulate 3000 samples per epoch (bypass ProcessWorker subprocess)
 epoch_buffer = []
 try:
     while len(stages_display) < MAX_EPOCHS:
@@ -230,15 +246,12 @@ try:
             break
 
         epoch_buffer.extend(samples)
-        # When we have enough samples for one epoch, run inference
         if len(epoch_buffer) >= 3000:
             epoch_data = epoch_buffer[:3000]
             epoch_buffer = epoch_buffer[3000:]
-            # Convert V -> uV (MNE reads EDF in Volts, worker expects uV)
             epoch_data = [[v*1e6, t] for v, t in epoch_data]
-            worker.consume(epoch_data)           # direct call, no subprocess
+            worker.consume(epoch_data)
 
-        # Refresh display
         stages_display = [p for p in worker.predictions if p >= 0]
         if stages_display:
             ax_hypno.clear()
@@ -247,7 +260,6 @@ try:
             n = len(stages_display)
             time_hours = np.arange(n + 1) * epoch_sec / 3600
 
-            # Clinical step-plot hypnogram
             for i in range(n):
                 color = STAGE_COLORS.get(stages_display[i], "#888888")
                 yb = STAGE_Y_POS[stages_display[i]] - 0.5
@@ -266,7 +278,6 @@ try:
             ax_hypno.set_ylabel("Sleep Stage", fontsize=11)
             ax_hypno.grid(axis='x', which='major', color='#CCCCCC', linewidth=0.5, alpha=0.7)
 
-            # Current stage indicator
             cur = stages_display[-1]
             ax_hypno.text(0.99, 0.95, f"Current: {STAGE_NAMES[cur]}",
                           transform=ax_hypno.transAxes, ha="right", va="top",
@@ -278,7 +289,6 @@ try:
                 fontsize=12, fontweight="bold"
             )
 
-            # Ground truth comparison
             true = player.get_true_stage_at(n - 1)
             if true >= 0:
                 color_true = STAGE_COLORS.get(true, "#888")
@@ -293,7 +303,6 @@ try:
             plt.tight_layout()
             plt.pause(0.05)
 
-        # Timing for smooth playback
         elapsed = time.perf_counter() - start
         expected = (player.position / player.target_srate) / SPEED
         if expected > elapsed:
@@ -306,7 +315,6 @@ finally:
 
     print(f"\nDemo finished: {len(stages_display)} epochs processed.")
 
-    # Accuracy vs ground truth
     truth = [player.get_true_stage_at(i) for i in range(len(stages_display))]
     correct = sum(1 for p, t in zip(stages_display, truth) if p == t >= 0)
     n_valid = sum(1 for t in truth if t >= 0)
