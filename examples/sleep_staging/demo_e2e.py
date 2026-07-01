@@ -89,15 +89,21 @@ else:
     print(f"EDF:  {os.path.basename(edf)}")
     print(f"Hyp:  {os.path.basename(hyp)}")
 
-# Load model
-raw_cls = lwmod.ParaSleep.module
-model = raw_cls(n_channels=3, n_samples=3000, n_classes=5).float()
+# Load model (auto-detect architecture from checkpoint)
 if os.path.exists(MODEL_PATH):
     state = torch.load(MODEL_PATH, map_location="cpu", weights_only=True)
-    model.load_state_dict(state)
-    print(f"Model: loaded ({sum(p.numel() for p in model.parameters()):,} params)")
+    # Detect TA architecture from state dict
+    use_ta = any(k.startswith('transformer.') for k in state.keys())
+    raw_cls = lwmod.ParaSleep.module
+    model = raw_cls(n_channels=3, n_samples=3000, n_classes=5,
+                    use_temporal_attention=use_ta).float()
+    model.load_state_dict(state, strict=False)
+    arch = 'TA' if use_ta else 'Base'
+    print(f"Model: loaded ({arch}, {sum(p.numel() for p in model.parameters()):,} params)")
 else:
     print("Model: WARNING — using untrained model (random predictions)!")
+    raw_cls = lwmod.ParaSleep.module
+    model = raw_cls(n_channels=3, n_samples=3000, n_classes=5).float()
 
 model.eval()
 

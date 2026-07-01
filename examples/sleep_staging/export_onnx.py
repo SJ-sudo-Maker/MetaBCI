@@ -273,13 +273,18 @@ def main():
     print("\n[1/5] Loading trained model...")
     raw_cls = lwmod.ParaSleep.module
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    n_ch = 3  # 3-epoch context
+    n_ch = int(args.context)  # context window from CLI
 
-    model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5).float()
+    # Auto-detect architecture
+    use_ta = any(k.startswith('transformer.') for k in state.keys())
+    arch = 'TA' if use_ta else 'Base'
+
+    model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5,
+                    use_temporal_attention=use_ta).float()
     model.load_state_dict(state, strict=False)
     model.eval()
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"  Parameters: {total_params:,}")
+    print(f"  Architecture: {arch} | Parameters: {total_params:,}")
 
     # ---- 2. Load calibration data (from cache if available) ----
     print("\n[2/5] Loading calibration data...")

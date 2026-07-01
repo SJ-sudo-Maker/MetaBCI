@@ -207,6 +207,12 @@ class SleepOnlineWorker(ProcessWorker):
             self.predictions.append(-1)
             return
 
+        # Skip if any buffer slot is None (bad signal epoch)
+        if any(e is None for e in self._epoch_buffer):
+            self.epoch_counter += 1
+            self.predictions.append(-1)
+            return
+
         # Stack 3 epochs as channels: (1, 3, 3000)
         ctx = np.stack([
             self._epoch_buffer[0],
