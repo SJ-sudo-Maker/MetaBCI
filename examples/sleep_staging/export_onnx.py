@@ -18,14 +18,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import argparse
-import time
+import os, argparse, time
 import numpy as np
 
 import torch
 import onnx
 import onnxruntime as ort
-from onnxruntime.quantization import quantize_static, QuantType, CalibrationDataReader
+from onnxruntime.quantization import (quantize_static, QuantType, QuantFormat,
+                                       CalibrationDataReader)
 
 from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
 from metabci.brainda.paradigms.sleep import SleepParadigm
@@ -127,7 +127,7 @@ def quantize_int8(
         model_input=fp32_path,
         model_output=int8_path,
         calibration_data_reader=reader,
-        quant_format=QuantType.QInt8,
+        quant_format=QuantFormat.QDQ,
         weight_type=QuantType.QInt8,
         activation_type=QuantType.QUInt8,
         per_channel=False,

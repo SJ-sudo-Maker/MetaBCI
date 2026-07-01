@@ -72,7 +72,7 @@ parser.add_argument('--model', type=str, default='parasleep',
 parser.add_argument('--sampler', type=str, default='none',
                     choices=['none', 'weighted'],
                     help='Sampling strategy')
-parser.add_argument('--label_smoothing', type=float, default=0.05,
+parser.add_argument('--label_smoothing', type=float, default=0.0,
                     help='Label smoothing (0=off)')
 
 # Angle 4: multi-task auxiliary
@@ -281,9 +281,9 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
     val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False)
     te_loader = DataLoader(te_ds, batch_size=args.batch, shuffle=False)
 
-    # Class weights (from training set)
-    _, counts = np.unique(y_tr, return_counts=True)
-    raw = np.sqrt([len(y_tr) / c for c in counts])
+    # Class weights (from training set, robust to missing classes)
+    counts = np.bincount(y_tr, minlength=5)
+    raw = np.sqrt(len(y_tr) / np.maximum(counts, 1))
     raw = np.clip(raw / raw.min(), 1.0, 10.0)
     cw = torch.tensor(raw, dtype=torch.float32).to(DEVICE)
     print(f"  Class weights: {raw.tolist()}")
@@ -308,10 +308,8 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
         else:              return 0.01  # base_lr × 0.01 = 1e-5
     sched = optim.lr_scheduler.LambdaLR(opt, lr_lambda=adjust_lr)
 
-    # EMA
-    ema_avg = lambda avg, new: 0.999 * avg + 0.001 * new if avg is not None else new
-    ema_state = None
-
+    best_val_f1 = 0.0
+    best_state = None
     train_losses = []; val_accs = []
 
     for epoch in range(1, args.epochs + 1):
@@ -337,14 +335,7 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
             tr_loss += loss.item() * Xb.size(0)
         sched.step()
 
-        # Update EMA
-        if ema_state is None:
-            ema_state = {k: v.clone() for k, v in model.state_dict().items()}
-        else:
-            for k in ema_state:
-                ema_state[k] = ema_avg(ema_state[k], model.state_dict()[k].float())
-
-        # Validation (use 5-class output only)
+        # Validation
         model.eval()
         all_vpred, all_vtrue = [], []
         with torch.no_grad():
@@ -356,24 +347,31 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
                     out = model(Xb)
                 all_vpred.append(out.argmax(1).cpu().numpy())
                 all_vtrue.append(yb.cpu().numpy())
-        val_acc = (np.concatenate(all_vpred) == np.concatenate(all_vtrue)).mean()
-        val_f1 = f1_score(np.concatenate(all_vtrue), np.concatenate(all_vpred),
-                          average='macro', zero_division=0)
+        vp = np.concatenate(all_vpred); vt = np.concatenate(all_vtrue)
+        val_acc = (vp == vt).mean()
+        val_f1 = f1_score(vt, vp, average='macro', zero_division=0)
 
         train_losses.append(tr_loss / len(X_tr))
         val_accs.append(val_acc)
 
-        torch.save(ema_state, args.save)
+        # Save best-val model
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            torch.save(best_state, args.save)
 
         if epoch == 1 or epoch % 10 == 0:
             elapsed = time.time() - global_start
+            # Print prediction distribution to detect collapse early
+            pred_count = np.bincount(vp, minlength=5)
             print(f"  Epoch {epoch:3d}/{args.epochs} | loss={tr_loss/len(X_tr):.4f} | "
                   f"val_f1={val_f1:.3f} | lr={opt.param_groups[0]['lr']:.1e} | "
                   f"{elapsed/60:.0f}min")
+            print(f"  Val pred dist: W={pred_count[0]} N1={pred_count[1]} "
+                  f"N2={pred_count[2]} N3={pred_count[3]} REM={pred_count[4]}")
 
-    # Test with EMA weights
-    state = torch.load(args.save, map_location=DEVICE, weights_only=True)
-    model.load_state_dict(state); model.eval()
+    # Test with best-val model
+    model.load_state_dict(best_state); model.eval()
     all_p, all_t = [], []
     with torch.no_grad():
         for Xb, yb in te_loader:
@@ -420,6 +418,12 @@ if len(all_subs) < total_needed:
 
 train_subs = all_subs[:args.subjects]
 test_subs = all_subs[args.subjects:args.subjects + args.test]
+
+# Save subject split for consistent evaluation
+os.makedirs(os.path.dirname(args.save) or '.', exist_ok=True)
+np.savez(args.save.replace('.pth', '_split.npz'),
+         train_subs=np.array(train_subs), test_subs=np.array(test_subs))
+print(f'Split saved: {args.save.replace(".pth", "_split.npz")}')
 
 print(f'Loading {len(train_subs)}+{len(test_subs)} subjects...')
 X_all, y_all, subj_all = load_windows(train_subs + test_subs, args.cache,

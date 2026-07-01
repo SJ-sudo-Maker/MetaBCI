@@ -24,8 +24,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default='parasleep_best.pth')
 parser.add_argument('--cache', type=str, default='data_cache')
 parser.add_argument('--subjects', type=int, default=10,
-                    help='Number of test subjects')
+                    help='Number of test subjects (ignored if --split provided)')
 parser.add_argument('--context', type=int, default=3)
+parser.add_argument('--causal', action='store_true',
+                    help='Use causal context (match training --causal flag)')
+parser.add_argument('--split', type=str, default=None,
+                    help='Path to _split.npz file from training (optional, ensures exact test set)')
 parser.add_argument('--device', type=str, default='cpu')
 parser.add_argument('--out', type=str, default='demo_outputs')
 args = parser.parse_args()
@@ -45,39 +49,65 @@ state = torch.load(args.model, map_location=DEVICE, weights_only=True)
 # Auto-detect model config from state dict
 if any(k.startswith('transformer.') for k in state.keys()):
     use_ta = True
-    print("  Detected: Temporal Attention architecture")
+    arch = 'TA'
 else:
     use_ta = False
-    print("  Detected: Base architecture")
+    arch = 'Base'
 
-n_ch = args.context
+# Detect context from checkpoint
+if use_ta and 'pos_embed' in state:
+    n_ch = state['pos_embed'].shape[1]
+elif 'mrfe.small_branch.dsconv.dw.weight' in state:
+    n_ch = state['mrfe.small_branch.dsconv.dw.weight'].shape[0]
+else:
+    n_ch = args.context
+
+target_idx = 'last' if (use_ta and args.causal) else 'center'
 model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5,
-                use_temporal_attention=use_ta).float().to(DEVICE)
-model.load_state_dict(state, strict=False)
+                use_temporal_attention=use_ta,
+                target_index=target_idx).float().to(DEVICE)
+missing, unexpected = model.load_state_dict(state, strict=False)
+if missing:
+    print(f"  Missing keys: {len(missing)}")
+if unexpected:
+    print(f"  Unexpected keys: {len(unexpected)}")
 model.eval()
-print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
+print(f"  Architecture: {arch} | ctx={n_ch} | target={target_idx} | "
+      f"{sum(p.numel() for p in model.parameters()):,} params")
 
 # =============================================================================
 # Load test data
 # =============================================================================
 print(f"\nLoading test data from: {args.cache}")
-# Try new naming first, fall back
-def find_cache_files(cache_dir, n_subjects):
-    """Find up to n_subjects cache files using current naming."""
-    import glob
-    patterns = [
-        f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
-        f'*_ctx{args.context}_center.npz',
-        '*.npz',
-    ]
-    files = []
-    for pat in patterns:
-        files = sorted(glob.glob(os.path.join(cache_dir, pat)))
-        if files:
-            break
-    return files[-n_subjects:]  # last N subjects as test
+mode = 'causal' if args.causal else 'center'
 
-test_files = find_cache_files(args.cache, args.subjects)
+# If --split provided, use exact test subjects from training
+if args.split and os.path.exists(args.split):
+    split_data = np.load(args.split, allow_pickle=True)
+    test_subs = set(split_data['test_subs'])
+    print(f"  Using split file: {args.split} ({len(test_subs)} test subjects)")
+else:
+    test_subs = None
+
+import glob
+patterns = [
+    f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
+    f'*_ctx{args.context}_{mode}.npz',
+    f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
+    f'*_ctx{args.context}_center.npz',
+    '*.npz',
+]
+test_files = []
+for pat in patterns:
+    test_files = sorted(glob.glob(os.path.join(args.cache, pat)))
+    if test_files:
+        break
+
+# Filter to test subjects if split provided
+if test_subs is not None:
+    test_files = [f for f in test_files
+                  if os.path.basename(f).split('_')[0] in test_subs]
+test_files = test_files[:args.subjects]
 print(f"  Found {len(test_files)} test subjects")
 
 X_list, y_list = [], []
@@ -109,12 +139,13 @@ y_pred = np.concatenate(all_preds)
 # =============================================================================
 # Metrics
 # =============================================================================
+LABELS_5 = [0, 1, 2, 3, 4]
 acc = accuracy_score(y_true, y_pred)
 macro_f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
 weighted_f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
 kappa = cohen_kappa_score(y_true, y_pred)
-per_class_f1 = f1_score(y_true, y_pred, average=None, zero_division=0)
-cm = confusion_matrix(y_true, y_pred)
+per_class_f1 = f1_score(y_true, y_pred, average=None, labels=LABELS_5, zero_division=0)
+cm = confusion_matrix(y_true, y_pred, labels=LABELS_5)
 
 print(f"\n{'='*60}")
 print(f"RESULTS — {len(test_files)} test subjects, {len(y_true)} epochs")
@@ -130,8 +161,8 @@ for i, name in enumerate(CLASS_NAMES):
           f"R={cm[i,i]/max(support,1):.3f}  "
           f"F1={per_class_f1[i]:.4f}  (n={support})")
 print()
-print(classification_report(y_true, y_pred, target_names=CLASS_NAMES,
-      digits=4, zero_division=0))
+print(classification_report(y_true, y_pred, labels=LABELS_5,
+      target_names=CLASS_NAMES, digits=4, zero_division=0))
 print("Confusion Matrix:")
 print(cm)
 

@@ -150,7 +150,10 @@ if DEMO_MODE == "cache":
     fig.canvas.manager.set_window_title("MetaBCI Sleep Monitor — Cache Demo")
 
     with torch.no_grad():
-        preds_all = model(torch.from_numpy(X_cache)).argmax(1).numpy()
+        out = model(torch.from_numpy(X_cache))
+        if isinstance(out, tuple):
+            out = out[0]
+        preds_all = out.argmax(1).numpy()
 
     for n in range(1, len(preds_all) + 1):
         ax_hypno.clear(); ax_text.clear()
