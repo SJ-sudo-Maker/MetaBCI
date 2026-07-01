@@ -55,7 +55,7 @@ parser.add_argument('--test', type=int, default=10, help='Test subjects')
 parser.add_argument('--epochs', type=int, default=150)
 parser.add_argument('--batch', type=int, default=128)
 parser.add_argument('--lr', type=float, default=1e-3)
-parser.add_argument('--wd', type=float, default=1.0, help='Weight decay')
+parser.add_argument('--wd', type=float, default=1e-2, help='Weight decay')
 parser.add_argument('--context', type=int, default=3, help='Context window (odd)')
 parser.add_argument('--causal', action='store_true',
                     help='Causal (left-only) context window')
