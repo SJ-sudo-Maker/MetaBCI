@@ -9,7 +9,11 @@ from typing import Optional, List, Dict
 import numpy as np
 
 import matplotlib
-matplotlib.use("TkAgg")
+try:
+    import tkinter
+    matplotlib.use("TkAgg")
+except Exception:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 

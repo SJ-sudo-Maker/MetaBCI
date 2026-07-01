@@ -256,9 +256,13 @@ def main():
                         help="Path to trained ParaSleep .pth checkpoint")
     parser.add_argument("--output", type=str, default="parasleep_int8.onnx",
                         help="Output ONNX path (default: parasleep_int8.onnx)")
+    parser.add_argument("--context", type=int, default=3,
+                        help="Context window size (default: 3)")
+    parser.add_argument("--cache", type=str, default=r'F:\sleep_cache',
+                        help="Cache directory for calibration data")
     parser.add_argument("--data-root", type=str,
                         default=r"D:\sleep eeg\sleep-edf-database-expanded-1.0.0\sleep-cassette",
-                        help="Path to sleep-edf data root")
+                        help="Path to sleep-edf data root (fallback)")
     parser.add_argument("--skip-quantize", action="store_true",
                         help="Skip INT8 quantization (FP32 only)")
     parser.add_argument("--verify", type=int, default=5,
@@ -288,16 +292,27 @@ def main():
 
     # ---- 2. Load calibration data (from cache if available) ----
     print("\n[2/5] Loading calibration data...")
-    import os as _os
-    cache_dir = "data_cache"
-    cal_subs = sorted([f.replace('.npz','') for f in _os.listdir(cache_dir) if f.endswith('.npz')])[:args.verify]
+    import glob as _glob
+    cache_dir = args.cache
+    # Try new naming first, fall back to old patterns
+    patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
+        f'*_ctx{args.context}_center.npz',
+        '*.npz',
+    ]
+    cal_files = []
+    for pat in patterns:
+        cal_files = sorted(_glob.glob(os.path.join(cache_dir, pat)))
+        if cal_files:
+            break
+    cal_files = cal_files[:args.verify]
     X_list, y_list = [], []
-    for s in cal_subs:
-        d = np.load(_os.path.join(cache_dir, f"{s}.npz"))
+    for f in cal_files:
+        d = np.load(f)
         X_list.append(d['X']); y_list.append(d['y'])
     X_cal = np.concatenate(X_list).astype(np.float32)
     y_cal = np.concatenate(y_list).astype(np.int64)
-    print(f"  Subjects: {cal_subs}")
+    print(f"  Subjects: {len(cal_files)}")
     print(f"  Samples: {X_cal.shape[0]}")
 
     # ---- 3. Export to ONNX ----

@@ -48,10 +48,25 @@ DEMO_MODE = "cache"                    # "cache" = pre-built npz (best), "edf" =
 
 if DEMO_MODE == "cache":
     # Load directly from cache (matches training data exactly)
+    import glob as _glob
     cache_dir = "data_cache" if os.path.isdir("data_cache") else r"F:\sleep_cache"
-    subs = sorted([f.replace('.npz','') for f in os.listdir(cache_dir) if f.endswith('.npz')])
-    sub = '4032'  # best REM+N3 mix for demo video
-    d = np.load(os.path.join(cache_dir, f'{sub}.npz'))
+    # Try new naming first, fall back to old patterns
+    for pat in ['*_FpzCz_sr100_ctx3_center_5class.npz', '*_ctx3_center.npz', '*.npz']:
+        subs = sorted([f.replace('_FpzCz_sr100_ctx3_center_5class.npz','').replace('_ctx3_center.npz','').replace('.npz','')
+                       for f in _glob.glob(os.path.join(cache_dir, pat))])
+        if subs:
+            break
+    sub = subs[0]  # auto-pick first available subject
+    print(f"Cache mode: subject {sub}")
+    # Find cache file with fallback
+    cache_path = None
+    for fmt in [os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx3_center_5class.npz'),
+                os.path.join(cache_dir, f'{sub}_ctx3_center.npz'),
+                os.path.join(cache_dir, f'{sub}.npz')]:
+        if os.path.exists(fmt):
+            cache_path = fmt
+            break
+    d = np.load(cache_path)
     X_cache, y_cache = d['X'], d['y']
     # Find sleep onset
     onset = 0
