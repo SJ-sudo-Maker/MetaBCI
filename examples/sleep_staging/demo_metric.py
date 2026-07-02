@@ -90,13 +90,20 @@ else:
     test_subs = None
 
 import glob
-patterns = [
-    f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
-    f'*_ctx{args.context}_{mode}.npz',
-    f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
-    f'*_ctx{args.context}_center.npz',
-    '*.npz',
-]
+mode = 'causal' if args.causal else 'center'
+if args.causal:
+    patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
+        f'*_ctx{args.context}_{mode}.npz',
+    ]
+else:
+    patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
+        f'*_ctx{args.context}_{mode}.npz',
+        f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
+        f'*_ctx{args.context}_center.npz',
+        '*.npz',
+    ]
 test_files = []
 for pat in patterns:
     test_files = sorted(glob.glob(os.path.join(args.cache, pat)))
@@ -107,7 +114,8 @@ for pat in patterns:
 if test_subs is not None:
     test_files = [f for f in test_files
                   if os.path.basename(f).split('_')[0] in test_subs]
-test_files = test_files[:args.subjects]
+else:
+    test_files = test_files[:args.subjects]
 print(f"  Found {len(test_files)} test subjects")
 for f in test_files:
     print(f"    {os.path.basename(f)}")

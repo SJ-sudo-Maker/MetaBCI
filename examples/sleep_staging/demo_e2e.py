@@ -36,13 +36,13 @@ import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 # =============================================================================
 
 DATA_ROOT = r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette"
-MODEL_PATH = "parasleep_best.pth"          # put trained .pth here
+MODEL_PATH = "exp_ctx3_causal.pth"     # trained model checkpoint
 SPEED = 300.0                          # 300x real-time for quick demo
 MAX_EPOCHS = 720                       # show 6 hours
 SUBJECT = None                         # None = auto-pick first available
 DEMO_MODE = "cache"                    # "cache" = pre-built npz (best), "edf" = raw EDF playback
 DEMO_CONTEXT = 3                       # context window size (must match training)
-DEMO_CAUSAL = False                    # True if model trained with --causal
+DEMO_CAUSAL = True                     # True if model trained with --causal
 MODE_STR = 'causal' if DEMO_CAUSAL else 'center'
 
 # =============================================================================
@@ -55,11 +55,14 @@ if DEMO_MODE == "cache":
     cache_dir = "data_cache" if os.path.isdir("data_cache") else r"F:\sleep_cache"
     # Try new naming first, fall back to old patterns
     ctx = DEMO_CONTEXT
-    for pat in [f'*_FpzCz_sr100_ctx{ctx}_{MODE_STR}_5class.npz',
-                f'*_ctx{ctx}_{MODE_STR}.npz',
-                f'*_FpzCz_sr100_ctx{ctx}_center_5class.npz',
-                f'*_ctx{ctx}_center.npz',
-                '*.npz']:
+    if DEMO_CAUSAL:
+        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_causal_5class.npz',
+                       f'*_ctx{ctx}_causal.npz']
+    else:
+        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_center_5class.npz',
+                       f'*_ctx{ctx}_center.npz',
+                       '*.npz']
+    for pat in search_pats:
         matches = _glob.glob(os.path.join(cache_dir, pat))
         if matches:
             break
