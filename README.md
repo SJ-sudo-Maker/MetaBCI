@@ -12,6 +12,83 @@ This is the first release of MetaBCI, our team will continue to maintain the rep
 
 We will send you a copy of the handbook as soon as we receive your information.
 
+## Sleep Staging — MetaBCI 创新应用开发赛项
+
+### 项目简介
+
+基于 MetaBCI 的单通道轻量级便携式睡眠监测系统。使用单通道 Fpz-Cz EEG 信号，30 秒为一 epoch，通过连续 3 个 epoch 构成时序上下文输入，实现 5 分类（W/N1/N2/N3/REM）睡眠分期。
+
+**队伍：** 晓途队 | **单位：** 湘潭大学 | **赛道：** 被动监测
+
+### 新增模块
+
+| 模块 | 路径 | 功能 |
+|------|------|------|
+| SleepEDFDataset | `metabci/brainda/datasets/sleep_edf.py` | Sleep-EDF Expanded 数据集加载（153 人） |
+| SleepParadigm | `metabci/brainda/paradigms/sleep.py` | 睡眠分期范式：center/causal 上下文窗口，5/4/3 分类标签映射 |
+| ParaSleep | `metabci/brainda/algorithms/deep_learning/parasleep.py` | 132K 参数轻量模型：双分支深度可分离卷积 + patch-based MHA + 可选 Temporal Attention |
+| SleepOnlineWorker | `metabci/brainflow/sleep_worker.py` | 在线推理器：因果滤波 + 信号质量门控 + LSL 推送 |
+| EDFSleepPlayer | `metabci/brainflow/edf_player.py` | EDF 文件倍速回放，模拟在线数据流 |
+| SleepMonitorUI | `metabci/brainstim/sleep_monitor.py` | 临床级睡眠报告：hypnogram + 阶段统计 |
+
+### 快速开始
+
+```bash
+# 环境
+conda create -n metabci python=3.9
+pip install torch numpy scipy scikit-learn mne skorch onnx onnxruntime matplotlib pylsl
+
+# 训练
+python examples/sleep_staging/train_server.py --context 3 --save parasleep.pth --cache F:\sleep_cache
+
+# 指标
+python examples/sleep_staging/demo_metric.py --model parasleep.pth --split parasleep_split.npz --cache F:\sleep_cache --context 3
+
+# 演示
+python examples/sleep_staging/demo_e2e.py
+
+# ONNX 导出
+python examples/sleep_staging/export_onnx.py --checkpoint parasleep.pth --context 3 --cache F:\sleep_cache
+```
+
+### 当前结果（holdout test，10 人）
+
+| 指标 | 值 |
+|------|-----|
+| Accuracy | 88.27% |
+| Macro F1 | 0.7465 |
+| Weighted F1 | 0.8920 |
+| Cohen's Kappa | 0.7705 |
+| W F1 | 0.9747 |
+| N1 F1 | 0.4737 |
+| N2 F1 | 0.7759 |
+| N3 F1 | 0.7487 |
+| REM F1 | 0.7594 |
+
+配置：`ctx=3 center | wd=1e-2 | label_smoothing=0 | FocalLoss(γ=2) | 80 train / 10 test`
+
+### 实验配置
+
+```bash
+# Baseline
+python -u train_server.py --context 1 --save exp_ctx1.pth --cache F:\sleep_cache
+
+# 核心消融
+python -u train_server.py --context 3 --save exp_ctx3_center.pth --cache F:\sleep_cache
+python -u train_server.py --context 3 --causal --save exp_ctx3_causal.pth --cache F:\sleep_cache
+
+# N1 优化
+python -u train_server.py --context 3 --sampler weighted --save exp_weighted.pth --cache F:\sleep_cache
+
+# Temporal Attention
+python -u train_server.py --model ta --context 3 --save exp_ta.pth --cache F:\sleep_cache
+
+# 5-fold CV
+python -u train_server.py --context 3 --cv 5 --save final_cv.pth --cache F:\sleep_cache
+```
+
+---
+
 ## Paper
 
 If you find MetaBCI useful in your research, please cite:
