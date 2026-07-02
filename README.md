@@ -16,7 +16,9 @@ We will send you a copy of the handbook as soon as we receive your information.
 
 ### 项目简介
 
-基于 MetaBCI 的单通道轻量级便携式睡眠监测系统。使用单通道 Fpz-Cz EEG 信号，30 秒为一 epoch，通过连续 3 个 epoch 构成时序上下文输入，实现 5 分类（W/N1/N2/N3/REM）睡眠分期。
+基于 MetaBCI 的单通道轻量级便携式睡眠监测系统。使用单通道 Fpz-Cz EEG 信号，30 秒为一 epoch，连续 3 个 epoch 构成时序上下文输入（causal 模式仅使用历史 epoch），实现 5 分类（W/N1/N2/N3/REM）睡眠分期。
+
+本次实验基于 Sleep-EDF Expanded sleep-cassette 已缓存的受试者进行训练与验证。
 
 **队伍：** 晓途队 | **单位：** 湘潭大学 | **赛道：** 被动监测
 
@@ -24,12 +26,12 @@ We will send you a copy of the handbook as soon as we receive your information.
 
 | 模块 | 路径 | 功能 |
 |------|------|------|
-| SleepEDFDataset | `metabci/brainda/datasets/sleep_edf.py` | Sleep-EDF Expanded 数据集加载（153 人） |
-| SleepParadigm | `metabci/brainda/paradigms/sleep.py` | 睡眠分期范式：center/causal 上下文窗口，5/4/3 分类标签映射 |
-| ParaSleep | `metabci/brainda/algorithms/deep_learning/parasleep.py` | 132K 参数轻量模型：双分支深度可分离卷积 + patch-based MHA + 可选 Temporal Attention |
-| SleepOnlineWorker | `metabci/brainflow/sleep_worker.py` | 在线推理器：因果滤波 + 信号质量门控 + LSL 推送 |
-| EDFSleepPlayer | `metabci/brainflow/edf_player.py` | EDF 文件倍速回放，模拟在线数据流 |
-| SleepMonitorUI | `metabci/brainstim/sleep_monitor.py` | 临床级睡眠报告：hypnogram + 阶段统计 |
+| SleepEDFDataset | `metabci/brainda/datasets/sleep_edf.py` | Sleep-EDF Expanded 数据集加载 |
+| SleepParadigm | `metabci/brainda/paradigms/sleep.py` | center/causal 上下文窗口，5/4/3 分类标签映射 |
+| ParaSleep | `metabci/brainda/algorithms/deep_learning/parasleep.py` | 约 132K 参数：双分支深度可分离卷积 + patch-based MHA |
+| SleepOnlineWorker | `metabci/brainflow/sleep_worker.py` | 在线推理：因果滤波 + 信号质量门控 + LSL |
+| EDFSleepPlayer | `metabci/brainflow/edf_player.py` | EDF 倍速回放，模拟在线数据流 |
+| SleepMonitorUI | `metabci/brainstim/sleep_monitor.py` | 临床睡眠报告：hypnogram + 阶段统计 |
 
 ### 快速开始
 
@@ -38,53 +40,63 @@ We will send you a copy of the handbook as soon as we receive your information.
 conda create -n metabci python=3.9
 pip install torch numpy scipy scikit-learn mne skorch onnx onnxruntime matplotlib pylsl
 
-# 训练
-python examples/sleep_staging/train_server.py --context 3 --save parasleep.pth --cache F:\sleep_cache
+# 训练最终在线主模型
+python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --save exp_ctx3_causal.pth --cache F:/sleep_cache
 
-# 指标
-python examples/sleep_staging/demo_metric.py --model parasleep.pth --split parasleep_split.npz --cache F:\sleep_cache --context 3
+# 评估 holdout test
+python examples/sleep_staging/demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache --context 3 --causal --out demo_outputs
 
-# 演示
+# 演示（编辑 demo_e2e.py 配置 MODEL_PATH/DEMO_CAUSAL 后运行）
 python examples/sleep_staging/demo_e2e.py
 
 # ONNX 导出
-python examples/sleep_staging/export_onnx.py --checkpoint parasleep.pth --context 3 --cache F:\sleep_cache
+python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --context 3 --cache F:/sleep_cache
 ```
 
-### 当前结果（holdout test，10 人）
+### 实验结果
 
-| 指标 | 值 |
-|------|-----|
-| Accuracy | 88.27% |
-| Macro F1 | 0.7465 |
-| Weighted F1 | 0.8920 |
-| Cohen's Kappa | 0.7705 |
-| W F1 | 0.9747 |
-| N1 F1 | 0.4737 |
-| N2 F1 | 0.7759 |
-| N3 F1 | 0.7487 |
-| REM F1 | 0.7594 |
+**主模型（holdout test，10 名受试者）**
 
-配置：`ctx=3 center | wd=1e-2 | label_smoothing=0 | FocalLoss(γ=2) | 80 train / 10 test`
+| 配置 | Accuracy | Macro-F1 | Weighted-F1 | Kappa |
+|---|---:|---:|---:|---:|
+| ctx=3 causal | 88.28% | 0.7468 | 0.8925 | 0.7714 |
 
-### 实验配置
+| 类别 | Precision | Recall | F1 |
+|---|---:|---:|---:|
+| W | 0.9837 | 0.9593 | 0.9714 |
+| N1 | 0.5671 | 0.3936 | 0.4649 |
+| N2 | 0.7497 | 0.8620 | 0.8013 |
+| N3 | 0.7683 | 0.7488 | 0.7585 |
+| REM | 0.6702 | 0.8204 | 0.7377 |
+
+配置：`ctx=3 causal | model=parasleep | sampler=none | aux=none | wd=1e-2 | label_smoothing=0 | FocalLoss(γ=2)`
+
+**离线对照（ctx=3 center，非在线可用）**
+
+| 配置 | Accuracy | Macro-F1 | Kappa |
+|---|---:|---:|---:|
+| ctx=3 center | 88.27% | 0.7465 | 0.7705 |
+
+**5-fold CV（ctx=3 causal）**
+
+| 配置 | Macro-F1 (mean±std) |
+|---|---|
+| 待 5-fold 完成后填入 | |
+
+### 实验命令
 
 ```bash
-# Baseline
-python -u train_server.py --context 1 --save exp_ctx1.pth --cache F:\sleep_cache
-
-# 核心消融
-python -u train_server.py --context 3 --save exp_ctx3_center.pth --cache F:\sleep_cache
-python -u train_server.py --context 3 --causal --save exp_ctx3_causal.pth --cache F:\sleep_cache
-
-# N1 优化
-python -u train_server.py --context 3 --sampler weighted --save exp_weighted.pth --cache F:\sleep_cache
-
-# Temporal Attention
-python -u train_server.py --model ta --context 3 --save exp_ta.pth --cache F:\sleep_cache
+# 最终主模型
+python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --save exp_ctx3_causal.pth --cache F:/sleep_cache
 
 # 5-fold CV
-python -u train_server.py --context 3 --cv 5 --save final_cv.pth --cache F:\sleep_cache
+python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --cv 5 --subjects 124 --test 10 --save exp_ctx3_causal_cv.pth --cache F:/sleep_cache
+
+# 消融实验
+python -u examples/sleep_staging/train_server.py --context 1 --save exp_ctx1.pth --cache F:/sleep_cache
+python -u examples/sleep_staging/train_server.py --context 3 --save exp_ctx3_center.pth --cache F:/sleep_cache
+python -u examples/sleep_staging/train_server.py --context 3 --sampler weighted --save exp_weighted.pth --cache F:/sleep_cache
+python -u examples/sleep_staging/train_server.py --model ta --context 3 --save exp_ta.pth --cache F:/sleep_cache
 ```
 
 ---

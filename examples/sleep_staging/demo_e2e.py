@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-End-to-end demo: EDF playback → SleepOnlineWorker → real-time hypnogram.
+End-to-end demo: cached/EDF playback → ParaSleep → real-time hypnogram.
 
 Usage
 -----
     python demo_e2e.py
 
-Requires a trained ParaSleep model at MODEL_PATH (default: parasleep_best.pth).
-Set DEMO_CONTEXT to match the model's training context window size.
+Default configuration uses the final online model:
+    MODEL_PATH = "exp_ctx3_causal.pth"
+    DEMO_CONTEXT = 3
+    DEMO_CAUSAL = True
+    DEMO_MODE = "cache"   (set to "edf" for EDF playback pipeline)
 """
 
 import sys
