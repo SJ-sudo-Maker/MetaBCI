@@ -109,6 +109,10 @@ if test_subs is not None:
                   if os.path.basename(f).split('_')[0] in test_subs]
 test_files = test_files[:args.subjects]
 print(f"  Found {len(test_files)} test subjects")
+for f in test_files:
+    print(f"    {os.path.basename(f)}")
+if test_subs is not None:
+    print(f"  Split test_subs: {sorted(test_subs)}")
 
 X_list, y_list = [], []
 for f in test_files:
