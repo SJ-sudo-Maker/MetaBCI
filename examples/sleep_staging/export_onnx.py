@@ -18,6 +18,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 import os, argparse, time
 import numpy as np
 
@@ -252,13 +255,14 @@ def benchmark(onnx_path: str, X_test: np.ndarray, n_warmup: int = 10,
 
 def main():
     parser = argparse.ArgumentParser(description="ParaSleep ONNX export + INT8 quantization")
-    parser.add_argument("--checkpoint", type=str, required=True,
+    parser.add_argument("--checkpoint", type=str,
+                        default="examples/sleep_staging/exp_ctx3_causal.pth",
                         help="Path to trained ParaSleep .pth checkpoint")
     parser.add_argument("--output", type=str, default="parasleep_int8.onnx",
                         help="Output ONNX path (default: parasleep_int8.onnx)")
     parser.add_argument("--context", type=int, default=3,
                         help="Context window size (default: 3)")
-    parser.add_argument("--cache", type=str, default=r'F:\sleep_cache',
+    parser.add_argument("--cache", type=str, default='examples/sleep_staging/data_cache',
                         help="Cache directory for calibration data")
     parser.add_argument("--data-root", type=str,
                         default=r"D:\sleep eeg\sleep-edf-database-expanded-1.0.0\sleep-cassette",
@@ -280,7 +284,10 @@ def main():
     # ---- 1. Load model ----
     print(f"\n[1/5] Loading trained model (ctx={args.context} {mode_str})...")
     raw_cls = lwmod.ParaSleep.module
-    state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    ckpt_path = Path(args.checkpoint)
+    if not ckpt_path.is_absolute():
+        ckpt_path = _PROJECT_ROOT / ckpt_path
+    state = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
     n_ch = int(args.context)
 
     # Auto-detect architecture
@@ -299,7 +306,7 @@ def main():
     # ---- 2. Load calibration data (from cache if available) ----
     print("\n[2/5] Loading calibration data...")
     import glob as _glob
-    cache_dir = args.cache
+    cache_dir = str(_PROJECT_ROOT / args.cache) if not Path(args.cache).is_absolute() else args.cache
     # Try new naming first, fall back to old patterns
     patterns = [
         f'*_FpzCz_sr100_ctx{args.context}_{mode_str}_5class.npz',
