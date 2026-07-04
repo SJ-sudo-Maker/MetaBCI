@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-End-to-end demo: cached/EDF playback → ParaSleep → real-time hypnogram.
+End-to-end demo: EDF playback → SleepOnlineWorker → real-time hypnogram.
 
 Usage
 -----
     python demo_e2e.py
 
-Default configuration uses the final online model:
+Default demo uses the final ctx=3 causal ParaSleep model:
     MODEL_PATH = "exp_ctx3_causal.pth"
-    DEMO_CONTEXT = 3
-    DEMO_CAUSAL = True
-    DEMO_MODE = "cache"   (set to "edf" for EDF playback pipeline)
+    SUBJECT = "4241"
+Set DEMO_CONTEXT to match the model's training context window size.
 """
 
 import sys
@@ -37,16 +36,24 @@ import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 # =============================================================================
 # Configuration
 # =============================================================================
-
 DATA_ROOT = r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette"
-MODEL_PATH = "exp_ctx3_causal.pth"     # trained model checkpoint
-SPEED = 300.0                          # 300x real-time for quick demo
-MAX_EPOCHS = 720                       # show 6 hours
-SUBJECT = None                         # None = auto-pick first available
-DEMO_MODE = "cache"                    # "cache" = pre-built npz (best), "edf" = raw EDF playback
-DEMO_CONTEXT = 3                       # context window size (must match training)
-DEMO_CAUSAL = True                     # True if model trained with --causal
-MODE_STR = 'causal' if DEMO_CAUSAL else 'center'
+CACHE_DIR = r"F:\sleep_cache"
+
+# Final online model used in the competition demo
+MODEL_PATH = "exp_ctx3_causal.pth"
+
+SPEED = 300.0
+MAX_EPOCHS = 720
+
+# Change this line only if you want another demo subject.
+# Available test examples: "4031", "4241", "4261", "4281", "4412", "4551", "4591", "4621", "4622", "4672"
+SUBJECT = "4241"
+
+DEMO_MODE = "cache"
+DEMO_CONTEXT = 3
+DEMO_CAUSAL = True
+
+MODE_STR = "causal" if DEMO_CAUSAL else "center"
 
 # =============================================================================
 # Setup
@@ -55,7 +62,7 @@ MODE_STR = 'causal' if DEMO_CAUSAL else 'center'
 if DEMO_MODE == "cache":
     # Load directly from cache (matches training data exactly)
     import glob as _glob
-    cache_dir = "data_cache" if os.path.isdir("data_cache") else r"F:\sleep_cache"
+    cache_dir = CACHE_DIR
     # Try new naming first, fall back to old patterns
     ctx = DEMO_CONTEXT
     if DEMO_CAUSAL:
@@ -69,18 +76,37 @@ if DEMO_MODE == "cache":
         matches = _glob.glob(os.path.join(cache_dir, pat))
         if matches:
             break
-    sub = os.path.basename(matches[0]).rsplit('_', 1)[0].split('_')[0] if matches else '4032'
+    if SUBJECT is not None:
+        sub = str(SUBJECT)
+    else:
+        sub = os.path.basename(matches[0]).rsplit('_', 1)[0].split('_')[0] if matches else '4032'
     print(f"Cache mode: subject {sub} (ctx={ctx} {MODE_STR})")
-    # Find cache file with fallback
+
+    # Find cache file. In causal mode, only causal cache is allowed to avoid accidental center-cache demo.
     cache_path = None
-    for fmt in [os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_{MODE_STR}_5class.npz'),
-                os.path.join(cache_dir, f'{sub}_ctx{ctx}_{MODE_STR}.npz'),
-                os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class.npz'),
-                os.path.join(cache_dir, f'{sub}_ctx{ctx}_center.npz'),
-                os.path.join(cache_dir, f'{sub}.npz')]:
+    if DEMO_CAUSAL:
+        cache_candidates = [
+            os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_causal_5class.npz'),
+            os.path.join(cache_dir, f'{sub}_ctx{ctx}_causal.npz'),
+        ]
+    else:
+        cache_candidates = [
+            os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class.npz'),
+            os.path.join(cache_dir, f'{sub}_ctx{ctx}_center.npz'),
+            os.path.join(cache_dir, f'{sub}.npz'),
+        ]
+
+    for fmt in cache_candidates:
         if os.path.exists(fmt):
             cache_path = fmt
             break
+
+    if cache_path is None:
+        raise FileNotFoundError(
+            f"Cannot find cache file for subject={sub}, ctx={ctx}, mode={MODE_STR} in {cache_dir}"
+        )
+
+    print(f"Cache file: {os.path.basename(cache_path)}")
     d = np.load(cache_path)
     X_cache, y_cache = d['X'], d['y']
     # Find sleep onset
@@ -138,11 +164,15 @@ if os.path.exists(MODEL_PATH):
                     target_index=target_idx).float()
     model.load_state_dict(state, strict=False)
     arch = 'TA' if use_ta else 'Base'
-    print(f"Model: loaded ({arch}, ctx={n_ch}, {sum(p.numel() for p in model.parameters()):,} params)")
+    param_count = sum(p.numel() for p in model.parameters())
+    model_info = f"Model: {MODEL_PATH} | {arch} | ctx={n_ch} | {MODE_STR}"
+    print(f"Model: loaded ({arch}, ctx={n_ch}, {param_count:,} params)")
+    print(f"Demo model info: {model_info}")
 else:
     print("Model: WARNING — using untrained model (random predictions)!")
     raw_cls = lwmod.ParaSleep.module
     model = raw_cls(n_channels=DEMO_CONTEXT, n_samples=3000, n_classes=5).float()
+    model_info = f"Model: RANDOM UNTRAINED | Base | ctx={DEMO_CONTEXT} | {MODE_STR}"
 
 model.eval()
 
@@ -153,7 +183,7 @@ if DEMO_MODE == "cache":
     plt.ion()
     fig, (ax_hypno, ax_text) = plt.subplots(2, 1, figsize=(14, 6),
         gridspec_kw={"height_ratios": [4, 1]})
-    fig.canvas.manager.set_window_title("MetaBCI Sleep Monitor — Cache Demo")
+    fig.canvas.manager.set_window_title(f"MetaBCI Sleep Monitor — {model_info}")
 
     with torch.no_grad():
         out = model(torch.from_numpy(X_cache))
@@ -186,12 +216,32 @@ if DEMO_MODE == "cache":
                       transform=ax_hypno.transAxes, ha="right", va="top",
                       fontsize=14, fontweight="bold", color=STAGE_COLORS[cur],
                       bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9))
-        ax_hypno.set_title(f"MetaBCI Sleep Monitor — {n*0.5:.0f} min", fontsize=12, fontweight="bold")
+        ax_hypno.set_title(
+            f"MetaBCI Sleep Monitor | {model_info} | Subject {sub} | {n*0.5:.0f} min",
+            fontsize=12,
+            fontweight="bold"
+        )
 
         true_cur = int(true_part[-1])
         correct = "[OK]" if cur == true_cur else "[X]"
-        ax_text.text(0.5, 0.5, f"Predict: {STAGE_NAMES[cur]}  |  Truth: {STAGE_NAMES[true_cur]}  {correct}",
-                     transform=ax_text.transAxes, ha="center", fontsize=14, fontweight="bold")
+        ax_text.text(
+            0.5,
+            0.58,
+            f"{model_info}",
+            transform=ax_text.transAxes,
+            ha="center",
+            fontsize=11,
+            fontweight="bold"
+        )
+        ax_text.text(
+            0.5,
+            0.22,
+            f"Predict: {STAGE_NAMES[cur]}  |  Truth: {STAGE_NAMES[true_cur]}  {correct}",
+            transform=ax_text.transAxes,
+            ha="center",
+            fontsize=14,
+            fontweight="bold"
+        )
         ax_text.axis("off")
         plt.tight_layout(); plt.pause(0.02)
 
@@ -238,7 +288,7 @@ if SKIP_WAKE:
 plt.ion()
 fig, (ax_hypno, ax_text) = plt.subplots(2, 1, figsize=(14, 6),
     gridspec_kw={"height_ratios": [4, 1]})
-fig.canvas.manager.set_window_title("MetaBCI Sleep Monitor — Live Demo")
+fig.canvas.manager.set_window_title(f"MetaBCI Sleep Monitor — {model_info}")
 
 epoch_sec = 30
 stages_display = []
@@ -294,7 +344,7 @@ try:
                           bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9))
 
             ax_hypno.set_title(
-                f"MetaBCI Sleep Monitor  —  {n * epoch_sec / 60:.0f} min",
+                f"MetaBCI Sleep Monitor | {model_info} | {n * epoch_sec / 60:.0f} min",
                 fontsize=12, fontweight="bold"
             )
 
