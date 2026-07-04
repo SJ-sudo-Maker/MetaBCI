@@ -44,9 +44,9 @@ pip install torch numpy scipy scikit-learn mne skorch onnx onnxruntime matplotli
 python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --save exp_ctx3_causal.pth --cache F:/sleep_cache
 
 # 评估 holdout test
-python examples/sleep_staging/demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache --context 3 --causal --out demo_outputs
+python examples/sleep_staging/demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache --context 3 --causal --out demo_outputs_ctx3_causal
 
-# 演示（编辑 demo_e2e.py 配置 MODEL_PATH/DEMO_CAUSAL 后运行）
+# 演示
 python examples/sleep_staging/demo_e2e.py
 
 # ONNX 导出
@@ -77,11 +77,17 @@ python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --
 |---|---:|---:|---:|
 | ctx=3 center | 88.27% | 0.7465 | 0.7705 |
 
-**5-fold CV（ctx=3 causal）**
+**5-fold CV（ctx=3 causal, 134 subjects, subject-wise）**
 
-| 配置 | Macro-F1 (mean±std) |
-|---|---|
-| 待 5-fold 完成后填入 | |
+| 指标 | Mean ± Std |
+|---|---:|
+| Accuracy | 90.38% ± 0.56% |
+| Macro-F1 | 77.06% ± 0.72% |
+| W F1 | 97.70% ± 0.19% |
+| N1 F1 | 46.46% ± 2.78% |
+| N2 F1 | 84.42% ± 1.55% |
+| N3 F1 | 82.97% ± 1.24% |
+| REM F1 | 73.75% ± 3.41% |
 
 ### 实验命令
 
@@ -98,6 +104,10 @@ python -u examples/sleep_staging/train_server.py --context 3 --save exp_ctx3_cen
 python -u examples/sleep_staging/train_server.py --context 3 --sampler weighted --save exp_weighted.pth --cache F:/sleep_cache
 python -u examples/sleep_staging/train_server.py --model ta --context 3 --save exp_ta.pth --cache F:/sleep_cache
 ```
+
+### 模型权重说明
+
+最终模型权重为 `exp_ctx3_causal.pth`，固定测试集划分文件为 `exp_ctx3_causal_split.npz`。若仓库中未包含上述文件，请从提交附件中获取，并将二者放入 `examples/sleep_staging/` 目录后运行评估与在线演示脚本。
 
 ---
 
