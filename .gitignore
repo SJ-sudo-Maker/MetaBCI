@@ -183,3 +183,5 @@ write_test_doc.py
 
 # Demo artifacts
 demos/brainstim_demos/*.png
+**/demo_outputs*/**
+*_split.npz
