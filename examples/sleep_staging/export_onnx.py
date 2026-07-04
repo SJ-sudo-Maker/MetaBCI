@@ -185,8 +185,8 @@ def verify_accuracy(onnx_path: str, X_test: np.ndarray, y_test: np.ndarray,
                 pt_out = pytorch_model(
                     torch.from_numpy(x)
                 )
-                if isinstance(pt_out, list):
-                    pt_out = torch.stack(pt_out).mean(0)
+                if isinstance(pt_out, (list, tuple)):
+                    pt_out = torch.stack(list(pt_out)).mean(0)
                 pt_out = pt_out.numpy()
             if np.argmax(onnx_out) == np.argmax(pt_out):
                 pt_match += 1

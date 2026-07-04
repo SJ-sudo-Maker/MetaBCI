@@ -144,6 +144,8 @@ with torch.no_grad():
     for Xb, _ in loader:
         Xb = Xb.to(DEVICE)
         out = model(Xb)
+        if isinstance(out, tuple):
+            out = out[0]
         all_preds.append(out.argmax(1).cpu().numpy())
 
 y_pred = np.concatenate(all_preds)

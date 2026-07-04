@@ -1,0 +1,12 @@
+Metric,Value
+Accuracy,0.882802
+Macro_F1,0.746756
+Weighted_F1,0.892543
+Cohens_Kappa,0.771416
+F1_W,0.971433
+F1_N1,0.464863
+F1_N2,0.801261
+F1_N3,0.758486
+F1_REM,0.737737
+Test_Epochs,27492
+Test_Subjects,10
