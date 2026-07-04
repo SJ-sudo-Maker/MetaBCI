@@ -36,14 +36,15 @@ import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 # =============================================================================
 # Configuration
 # =============================================================================
-DATA_ROOT = r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette"
-CACHE_DIR = r"F:\sleep_cache"
+DATA_ROOT = r"D:\sleep eeg\sleep-edf-database-expanded-1.0.0\sleep-cassette"
+CACHE_DIR = r"C:\Users\lenovo\Desktop\MetaBCI-sleep\data_cache"
 
 # Final online model used in the competition demo
 MODEL_PATH = "exp_ctx3_causal.pth"
 
 SPEED = 300.0
 MAX_EPOCHS = 720
+RENDER_EVERY = 5     # only redraw every N epochs (higher = faster video)
 
 # Change this line only if you want another demo subject.
 # Available test examples: "4031", "4241", "4261", "4281", "4412", "4551", "4591", "4621", "4622", "4672"
@@ -192,6 +193,8 @@ if DEMO_MODE == "cache":
         preds_all = out.argmax(1).numpy()
 
     for n in range(1, len(preds_all) + 1):
+        if n > 1 and n % RENDER_EVERY != 0 and n != len(preds_all):
+            continue  # skip frames for speed
         ax_hypno.clear(); ax_text.clear()
         time_hours = np.arange(n + 1) * 30 / 3600
         preds_part = preds_all[:n]
@@ -224,26 +227,15 @@ if DEMO_MODE == "cache":
 
         true_cur = int(true_part[-1])
         correct = "[OK]" if cur == true_cur else "[X]"
-        ax_text.text(
-            0.5,
-            0.58,
-            f"{model_info}",
-            transform=ax_text.transAxes,
-            ha="center",
-            fontsize=11,
-            fontweight="bold"
-        )
-        ax_text.text(
-            0.5,
-            0.22,
+        ax_text.text(0.5, 0.58, f"{model_info}",
+                     transform=ax_text.transAxes, ha="center",
+                     fontsize=11, fontweight="bold")
+        ax_text.text(0.5, 0.22,
             f"Predict: {STAGE_NAMES[cur]}  |  Truth: {STAGE_NAMES[true_cur]}  {correct}",
-            transform=ax_text.transAxes,
-            ha="center",
-            fontsize=14,
-            fontweight="bold"
-        )
+            transform=ax_text.transAxes, ha="center",
+            fontsize=14, fontweight="bold")
         ax_text.axis("off")
-        plt.tight_layout(); plt.pause(0.02)
+        plt.tight_layout(); plt.pause(0.001)
 
     plt.ioff(); plt.close()
     from collections import Counter
