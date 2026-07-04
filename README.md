@@ -47,7 +47,7 @@ python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 6
 python examples/sleep_staging/demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache --context 3 --causal --out demo_outputs
 
 # 演示（编辑 demo_e2e.py 配置 MODEL_PATH/DEMO_CAUSAL 后运行）
-python examples/sleep_staging/demo_e2e_with_model_info.py
+python examples/sleep_staging/demo_e2e.py
 
 # ONNX 导出
 python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --context 3 --cache F:/sleep_cache
