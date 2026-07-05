@@ -2,29 +2,23 @@
 """
 ParaSleep server training — unified experiment runner.
 
-Supports all four improvement angles:
-  1. Causal context input (--causal, --context)
-  2. Lightweight temporal attention (--model ta)
-  3. N1-focused class imbalance (--sampler weighted)
-  4. Multi-task auxiliary training (--aux multitask)
+Supports: causal/center context, temporal attention, weighted sampler,
+          multi-task auxiliary training, and subject-wise K-fold CV.
 
-Usage:
-    # Angle 1: context comparison
-    python train_server.py --context 1
-    python train_server.py --context 3
-    python train_server.py --context 3 --causal
-    python train_server.py --context 5
-    python train_server.py --context 5 --causal
+Quick start (final model):
+    python train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --save exp_ctx3_causal.pth --cache F:/sleep_cache
 
-    # Angle 3: sampler
-    python train_server.py --sampler weighted
-    python train_server.py --sampler weighted --label_smoothing 0
+Holdout evaluation:
+    python demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache --context 3 --causal --out demo_outputs_ctx3_causal
 
-    # Angle 2+4: final config
-    python train_server.py --model ta --context 5 --causal --sampler weighted --aux multitask
+5-fold CV:
+    python train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --sampler none --aux none --cv 5 --subjects 124 --test 10 --save exp_ctx3_causal_cv.pth --cache F:/sleep_cache
 
-    # Final 5-fold CV
-    python train_server.py --model ta --context 5 --causal --sampler weighted --aux multitask --cv 5
+Ablation experiments:
+    python train_server.py --context 1 --save exp_ctx1.pth --cache F:/sleep_cache
+    python train_server.py --context 3 --save exp_ctx3_center.pth --cache F:/sleep_cache
+    python train_server.py --context 3 --sampler weighted --save exp_weighted.pth --cache F:/sleep_cache
+    python train_server.py --model ta --context 3 --save exp_ta.pth --cache F:/sleep_cache
 """
 
 import sys, os, argparse, time

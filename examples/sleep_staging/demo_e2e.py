@@ -36,8 +36,8 @@ import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 # =============================================================================
 # Configuration
 # =============================================================================
-DATA_ROOT = r"D:\sleep eeg\sleep-edf-database-expanded-1.0.0\sleep-cassette"
-CACHE_DIR = r"C:\Users\lenovo\Desktop\MetaBCI-sleep\data_cache"
+DATA_ROOT = os.environ.get("SLEEP_DATA", r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette")
+CACHE_DIR = os.environ.get("SLEEP_CACHE", r"F:\sleep_cache")
 
 # Final online model used in the competition demo
 MODEL_PATH = "exp_ctx3_causal.pth"
