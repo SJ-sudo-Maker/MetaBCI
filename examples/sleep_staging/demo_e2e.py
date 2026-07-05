@@ -42,7 +42,7 @@ CACHE_DIR = r"C:\Users\lenovo\Desktop\MetaBCI-sleep\data_cache"
 # Final online model used in the competition demo
 MODEL_PATH = "exp_ctx3_causal.pth"
 
-SPEED = 300.0
+SPEED = 500.0
 MAX_EPOCHS = 720
 RENDER_EVERY = 5     # only redraw every N epochs (higher = faster video)
 
