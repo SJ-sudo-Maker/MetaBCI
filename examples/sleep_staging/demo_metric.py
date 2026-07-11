@@ -113,7 +113,7 @@ for pat in patterns:
 # Filter to test subjects if split provided
 if test_subs is not None:
     test_files = [f for f in test_files
-                  if os.path.basename(f).split('_')[0] in test_subs]
+                  if os.path.basename(f).split('_')[0].replace('.npz', '') in test_subs]
 else:
     test_files = test_files[:args.subjects]
 print(f"  Found {len(test_files)} test subjects")
