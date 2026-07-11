@@ -84,7 +84,7 @@ mode = 'causal' if args.causal else 'center'
 # If --split provided, use exact test subjects from training
 if args.split and os.path.exists(args.split):
     split_data = np.load(args.split, allow_pickle=True)
-    test_subs = set(split_data['test_subs'])
+    test_subs = set(map(str, split_data['test_subs'].tolist()))
     print(f"  Using split file: {args.split} ({len(test_subs)} test subjects)")
 else:
     test_subs = None
@@ -117,6 +117,11 @@ if test_subs is not None:
 else:
     test_files = test_files[:args.subjects]
 print(f"  Found {len(test_files)} test subjects")
+if len(test_files) == 0:
+    raise FileNotFoundError(
+        f"No cache files found in {args.cache} for ctx={args.context}, mode={mode}. "
+        f"Check --cache path, --context, --causal flag, and --split file."
+    )
 for f in test_files:
     print(f"    {os.path.basename(f)}")
 if test_subs is not None:
