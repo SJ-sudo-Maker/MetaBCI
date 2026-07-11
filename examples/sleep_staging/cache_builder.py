@@ -36,7 +36,12 @@ suffix = f'_FpzCz_sr100_ctx{args.context}_{mode}_{args.label_mode}.npz'
 os.makedirs(args.cache, exist_ok=True)
 
 dataset = SleepEDFDataset(args.data, channel="EEG Fpz-Cz")
-paradigm = SleepParadigm(channels=["EEG Fpz-Cz"], srate=100)
+paradigm = SleepParadigm(
+    channels=["EEG Fpz-Cz"], srate=100,
+    context=args.context,
+    context_mode='causal' if args.causal else 'center',
+    label_mode=args.label_mode,
+)
 
 done, skipped = 0, 0
 for s in dataset.subjects:

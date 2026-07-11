@@ -106,14 +106,15 @@ fp32_kb = os.path.getsize(onnx_p)/1024
 print(f"  FP32 ONNX: {fp32_kb:.0f} KB")
 
 # INT8
-from onnxruntime.quantization import quantize_static, QuantType, CalibrationDataReader
+from onnxruntime.quantization import (quantize_static, QuantType, QuantFormat,
+                                       CalibrationDataReader)
 class CR(CalibrationDataReader):
     def __init__(s): s.d=np.random.randn(100,3,3000).astype(np.float32); s.n=100; s.i=0
     def get_next(s):
         if s.i>=s.n: return None
         b=s.d[s.i:s.i+1]; s.i+=1; return {'X':b}
 int8_p = 'demo_outputs/06_parasleep_int8.onnx'
-quantize_static(onnx_p, int8_p, CR(), quant_format=QuantType.QInt8, weight_type=QuantType.QInt8)
+quantize_static(onnx_p, int8_p, CR(), quant_format=QuantFormat.QDQ, weight_type=QuantType.QInt8)
 int8_kb = os.path.getsize(int8_p)/1024
 print(f"  INT8 ONNX: {int8_kb:.0f} KB ({100*(1-int8_kb/fp32_kb):.0f}% reduction)")
 
