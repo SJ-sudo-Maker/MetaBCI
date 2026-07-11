@@ -186,3 +186,4 @@ demos/brainstim_demos/*.png
 **/demo_outputs*/**
 *_split.npz
 *.onnx.data
+*.txt
