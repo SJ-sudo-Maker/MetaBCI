@@ -81,8 +81,10 @@ def build_sleep_report(
     sleep_onset = _find_sleep_onset(predictions)
     latency_min = sleep_onset * epoch_sec / 60
     total_min = n_epochs * epoch_sec / 60
-    tst_min = (n_epochs - sleep_onset) * epoch_sec / 60
-    efficiency = (tst_min / max(total_min - latency_min, 1)) * 100
+    # TST = actual sleep epochs (N1+N2+N3+REM), excluding Wake during the night
+    tst_epochs = sum(stage_count[i] for i in [1, 2, 3, 4])
+    tst_min = tst_epochs * epoch_sec / 60
+    efficiency = (tst_min / max(total_min, 1)) * 100
 
     # ---- Build figure ----
     fig = plt.figure(figsize=(16, 8), facecolor='white')

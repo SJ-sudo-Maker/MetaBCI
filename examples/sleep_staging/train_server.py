@@ -129,6 +129,13 @@ def _get_paradigm():
 # Encodes channel, srate, context, mode, and label_mode to prevent
 # cross-experiment cache pollution.
 
+# Map Sleep Cassette record IDs (e.g. "4001", "4002") to real subject IDs (e.g. "00").
+# SC4ssNE0: ss=subject (00-82), N=night (1-2). Same subject's nights must stay together.
+def _real_subject_id(record_id):
+    """Extract real subject ID from Sleep Cassette record ID."""
+    s = str(record_id)
+    return s[1:3] if len(s) >= 3 else s
+
 def cache_filename(sub, context, causal, label_mode='5class'):
     mode = 'causal' if causal else 'center'
     return f'{sub}_FpzCz_sr100_ctx{context}_{mode}_{label_mode}.npz'
@@ -198,7 +205,10 @@ def load_windows(subjects, cache_dir, context, causal):
         if p is not None:
             d = np.load(p)
             X_list.append(d['X']); y_list.append(d['y'])
-            subj_list.extend([s] * len(d['y']))
+            # Use REAL subject ID (without night suffix) for subject-wise splits.
+            # SC4ssNE0 → ss is the subject, N is the night.
+            real_id = _real_subject_id(s)
+            subj_list.extend([real_id] * len(d['y']))
     return np.concatenate(X_list), np.concatenate(y_list), np.array(subj_list)
 
 

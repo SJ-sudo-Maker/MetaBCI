@@ -105,6 +105,8 @@ class EDFSleepPlayer(BaseAmplifier):
         raw.filter(0.5, 40, verbose=False)   # match SleepParadigm sleep_preprocess_hook
         raw.resample(srate, verbose=False)
         self.data = raw.get_data().squeeze().astype(np.float64)
+        # Convert V → μV for consistent internal units (SleepOnlineWorker expects μV)
+        self.data *= 1e6
         self.n_samples = len(self.data)
         self.duration_sec = self.n_samples / srate
         self.position = 0

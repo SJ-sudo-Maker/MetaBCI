@@ -1,0 +1,229 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 820">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap');
+      text { font-family: 'JetBrains Mono', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+    </style>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrow-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#34d399"/>
+    </marker>
+    <marker id="arrow-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24"/>
+    </marker>
+    <linearGradient id="grad-title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#0f172a"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+
+  <!-- Title -->
+  <text x="550" y="36" fill="url(#grad-title)" font-size="18" font-weight="700" text-anchor="middle">MetaBCI 睡眠分期系统 — 整体架构</text>
+  <text x="550" y="56" fill="#64748b" font-size="10" text-anchor="middle">基于 MetaBCI brainda / brainflow / brainstim 三层子平台扩展</text>
+
+  <!-- ================================================================= -->
+  <!-- Layer 1: brainda (y=80 ~ y=320) -->
+  <!-- ================================================================= -->
+  <rect x="30" y="75" width="1040" height="250" rx="12" fill="none" stroke="#22d3ee" stroke-width="1.2" stroke-dasharray="8,4"/>
+  <text x="48" y="96" fill="#22d3ee" font-size="11" font-weight="700">brainda — 数据加载与解码算法</text>
+
+  <!-- Data flow: EDF files → Dataset → Paradigm → Model -->
+
+  <!-- EDF Files (external input) -->
+  <rect x="55" y="120" width="110" height="70" rx="6" fill="#0f172a"/>
+  <rect x="55" y="120" width="110" height="70" rx="6" fill="rgba(30,41,59,0.6)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="110" y="148" fill="#94a3b8" font-size="10" font-weight="600" text-anchor="middle">Sleep-EDF</text>
+  <text x="110" y="164" fill="#64748b" font-size="8" text-anchor="middle">PSG + Hypnogram</text>
+  <text x="110" y="178" fill="#64748b" font-size="8" text-anchor="middle">153 subjects</text>
+
+  <!-- Arrow EDF → Dataset -->
+  <path d="M 170 155 L 210 155" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+  <!-- SleepEDFDataset -->
+  <rect x="220" y="115" width="170" height="80" rx="6" fill="#0f172a"/>
+  <rect x="220" y="115" width="170" height="80" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="305" y="140" fill="white" font-size="10" font-weight="700" text-anchor="middle">SleepEDFDataset</text>
+  <text x="305" y="156" fill="#94a3b8" font-size="8" text-anchor="middle">BaseDataset 扩展</text>
+  <text x="305" y="170" fill="#64748b" font-size="7.5" text-anchor="middle">Fpz-Cz单通道提取</text>
+  <text x="305" y="184" fill="#64748b" font-size="7.5" text-anchor="middle">0.3-45Hz滤波/100Hz重采样</text>
+
+  <!-- Arrow Dataset → Paradigm -->
+  <path d="M 395 155 L 435 155" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+  <!-- SleepParadigm -->
+  <rect x="445" y="115" width="180" height="80" rx="6" fill="#0f172a"/>
+  <rect x="445" y="115" width="180" height="80" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="535" y="140" fill="white" font-size="10" font-weight="700" text-anchor="middle">SleepParadigm</text>
+  <text x="535" y="156" fill="#94a3b8" font-size="8" text-anchor="middle">BaseParadigm 扩展</text>
+  <text x="535" y="170" fill="#64748b" font-size="7.5" text-anchor="middle">center / causal 上下文窗口</text>
+  <text x="535" y="184" fill="#64748b" font-size="7.5" text-anchor="middle">5/4/3-class 标签映射</text>
+
+  <!-- Arrow Paradigm → Model -->
+  <path d="M 630 155 L 670 155" fill="none" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+  <!-- ParaSleep Model -->
+  <rect x="680" y="108" width="240" height="95" rx="6" fill="#0f172a"/>
+  <rect x="680" y="108" width="240" height="95" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="2"/>
+  <text x="800" y="132" fill="#fbbf24" font-size="10" font-weight="700" text-anchor="middle">★ ParaSleep 模型</text>
+  <text x="800" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">131,885 参数轻量级架构</text>
+  <text x="800" y="162" fill="#64748b" font-size="7.5" text-anchor="middle">双分支深度可分离卷积 (k=5, k=51)</text>
+  <text x="800" y="175" fill="#64748b" font-size="7.5" text-anchor="middle">3× Patch-based MHA (8 heads, P=25)</text>
+  <text x="800" y="188" fill="#64748b" font-size="7.5" text-anchor="middle">可选 TA 模式 (epoch-level Transformer)</text>
+  <text x="800" y="200" fill="#64748b" font-size="7.5" text-anchor="middle">可选 多任务辅助头 (5+4+3 class)</text>
+
+  <!-- ParaSleep internal detail boxes -->
+  <rect x="55" y="225" width="200" height="45" rx="4" fill="#0f172a"/>
+  <rect x="55" y="225" width="200" height="45" rx="4" fill="rgba(8,51,68,0.3)" stroke="#22d3ee" stroke-width="0.8"/>
+  <text x="155" y="243" fill="#94a3b8" font-size="8" text-anchor="middle">MultiResolutionBranch</text>
+  <text x="155" y="258" fill="#64748b" font-size="7" text-anchor="middle">双分支: small(k=5) + large(k=51)</text>
+
+  <rect x="275" y="225" width="170" height="45" rx="4" fill="#0f172a"/>
+  <rect x="275" y="225" width="170" height="45" rx="4" fill="rgba(8,51,68,0.3)" stroke="#22d3ee" stroke-width="0.8"/>
+  <text x="360" y="243" fill="#94a3b8" font-size="8" text-anchor="middle">InvertedResidual1d</text>
+  <text x="360" y="258" fill="#64748b" font-size="7" text-anchor="middle">expand_ratio=2, k=9</text>
+
+  <rect x="465" y="225" width="200" height="45" rx="4" fill="#0f172a"/>
+  <rect x="465" y="225" width="200" height="45" rx="4" fill="rgba(8,51,68,0.3)" stroke="#22d3ee" stroke-width="0.8"/>
+  <text x="565" y="243" fill="#94a3b8" font-size="8" text-anchor="middle">TemporalAttentionBlock ×3</text>
+  <text x="565" y="258" fill="#64748b" font-size="7" text-anchor="middle">patch=25, n_heads=8, GAP → FC(5)</text>
+
+  <rect x="685" y="225" width="235" height="45" rx="4" fill="#0f172a"/>
+  <rect x="685" y="225" width="235" height="45" rx="4" fill="rgba(8,51,68,0.3)" stroke="#22d3ee" stroke-width="0.8"/>
+  <text x="802" y="243" fill="#94a3b8" font-size="8" text-anchor="middle">Auxiliary Heads (可选)</text>
+  <text x="802" y="258" fill="#64748b" font-size="7" text-anchor="middle">5-class 主任务 + 4-class + 3-class 辅助</text>
+
+  <!-- FocalLoss + Optimizer indicator -->
+  <rect x="55" y="282" width="865" height="28" rx="4" fill="#0f172a"/>
+  <rect x="55" y="282" width="865" height="28" rx="4" fill="rgba(8,51,68,0.2)" stroke="#22d3ee" stroke-width="0.5"/>
+  <text x="487" y="300" fill="#64748b" font-size="8" text-anchor="middle">FocalLoss (γ=2) + sqrt class weights (cap 10×) | AdamW (wd=1e-2) | 三段式 LR: 1e-3→1e-4→1e-5 | Best-val checkpoint</text>
+
+  <!-- ================================================================= -->
+  <!-- Layer 2: brainflow (y=340 ~ y=540) -->
+  <!-- ================================================================= -->
+  <rect x="30" y="340" width="1040" height="205" rx="12" fill="none" stroke="#34d399" stroke-width="1.2" stroke-dasharray="8,4"/>
+  <text x="48" y="362" fill="#34d399" font-size="11" font-weight="700">brainflow — 在线数据处理与实时推理</text>
+
+  <!-- Left: EDFSleepPlayer (offline replay) -->
+  <rect x="55" y="385" width="240" height="80" rx="6" fill="#0f172a"/>
+  <rect x="55" y="385" width="240" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="175" y="410" fill="white" font-size="10" font-weight="700" text-anchor="middle">EDFSleepPlayer</text>
+  <text x="175" y="426" fill="#94a3b8" font-size="8" text-anchor="middle">BaseAmplifier 扩展</text>
+  <text x="175" y="440" fill="#64748b" font-size="7.5" text-anchor="middle">EDF 文件加载与倍速回放</text>
+  <text x="175" y="454" fill="#64748b" font-size="7.5" text-anchor="middle">Hypnogram ground truth 对比</text>
+
+  <!-- Arrow: Player → Worker -->
+  <path d="M 300 425 L 420 425" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+  <text x="360" y="418" fill="#34d399" font-size="7" text-anchor="middle">3000 samples</text>
+  <text x="360" y="438" fill="#34d399" font-size="7" text-anchor="middle">per epoch</text>
+
+  <!-- Middle: SleepOnlineWorker (online inference) -->
+  <rect x="430" y="378" width="280" height="95" rx="6" fill="#0f172a"/>
+  <rect x="430" y="378" width="280" height="95" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="2"/>
+  <text x="570" y="400" fill="#fbbf24" font-size="10" font-weight="700" text-anchor="middle">★ SleepOnlineWorker</text>
+  <text x="570" y="416" fill="#94a3b8" font-size="8" text-anchor="middle">ProcessWorker 扩展</text>
+  <text x="570" y="432" fill="#64748b" font-size="7.5" text-anchor="middle">因果滤波 (lfilter + lfilter_zi)</text>
+  <text x="570" y="446" fill="#64748b" font-size="7.5" text-anchor="middle">信号质量门控 (ptp 5-500 µV)</text>
+  <text x="570" y="460" fill="#64748b" font-size="7.5" text-anchor="middle">多 epoch 上下文缓冲 (deque)</text>
+
+  <!-- Arrow: Worker → LSL / downstream -->
+  <path d="M 715 425 L 790 425" fill="none" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+
+  <!-- Right: LSL Output -->
+  <rect x="800" y="395" width="160" height="60" rx="6" fill="#0f172a"/>
+  <rect x="800" y="395" width="160" height="60" rx="6" fill="rgba(6,78,59,0.3)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="880" y="420" fill="white" font-size="10" font-weight="600" text-anchor="middle">LSL 实时推送</text>
+  <text x="880" y="438" fill="#64748b" font-size="8" text-anchor="middle">睡眠阶段预测流</text>
+
+  <!-- Worker internal flow -->
+  <rect x="55" y="485" width="250" height="40" rx="4" fill="#0f172a"/>
+  <rect x="55" y="485" width="250" height="40" rx="4" fill="rgba(6,78,59,0.3)" stroke="#34d399" stroke-width="0.8"/>
+  <text x="180" y="500" fill="#64748b" font-size="8" text-anchor="middle">EEG Buffer → 滤波 → 质量检查</text>
+  <text x="180" y="515" fill="#64748b" font-size="8" text-anchor="middle">→ 上下文窗口 → 模型推理 → LSL</text>
+
+  <rect x="330" y="485" width="380" height="40" rx="4" fill="#0f172a"/>
+  <rect x="330" y="485" width="380" height="40" rx="4" fill="rgba(6,78,59,0.3)" stroke="#34d399" stroke-width="0.8"/>
+  <text x="520" y="500" fill="#64748b" font-size="8" text-anchor="middle">Causal Window: [t-2, t-1, t] → predict t</text>
+  <text x="520" y="515" fill="#64748b" font-size="8" text-anchor="middle">不依赖未来 epoch，满足在线监测因果性约束</text>
+
+  <!-- ================================================================= -->
+  <!-- Layer 3: brainstim (y=560 ~ y=720) -->
+  <!-- ================================================================= -->
+  <rect x="30" y="560" width="1040" height="165" rx="12" fill="none" stroke="#a78bfa" stroke-width="1.2" stroke-dasharray="8,4"/>
+  <text x="48" y="582" fill="#a78bfa" font-size="11" font-weight="700">brainstim — 可视化与睡眠报告生成</text>
+
+  <!-- Hypnogram -->
+  <rect x="55" y="600" width="230" height="90" rx="6" fill="#0f172a"/>
+  <rect x="55" y="600" width="230" height="90" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="170" y="625" fill="white" font-size="10" font-weight="700" text-anchor="middle">SleepMonitorUI</text>
+  <text x="170" y="641" fill="#94a3b8" font-size="8" text-anchor="middle">临床级 Hypnogram 可视化</text>
+  <text x="170" y="655" fill="#64748b" font-size="7.5" text-anchor="middle">AASM 标准色板</text>
+  <text x="170" y="669" fill="#64748b" font-size="7.5" text-anchor="middle">阶梯图 + 当前阶段标注</text>
+  <text x="170" y="683" fill="#64748b" font-size="7.5" text-anchor="middle">真实/预测对比显示</text>
+
+  <!-- Stage Stats -->
+  <rect x="315" y="600" width="200" height="90" rx="6" fill="#0f172a"/>
+  <rect x="315" y="600" width="200" height="90" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="415" y="625" fill="white" font-size="10" font-weight="600" text-anchor="middle">阶段统计报告</text>
+  <text x="415" y="641" fill="#64748b" font-size="8" text-anchor="middle">W/N1/N2/N3/REM 占比</text>
+  <text x="415" y="655" fill="#64748b" font-size="8" text-anchor="middle">饼图 + 统计表</text>
+  <text x="415" y="669" fill="#64748b" font-size="8" text-anchor="middle">睡眠效率 / 潜伏期</text>
+  <text x="415" y="683" fill="#64748b" font-size="8" text-anchor="middle">Experiment 注册</text>
+
+  <!-- ONNX Export -->
+  <rect x="545" y="600" width="200" height="55" rx="6" fill="#0f172a"/>
+  <rect x="545" y="600" width="200" height="55" rx="6" fill="rgba(76,29,149,0.3)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="645" y="622" fill="white" font-size="10" font-weight="600" text-anchor="middle">ONNX / INT8 导出</text>
+  <text x="645" y="640" fill="#64748b" font-size="8" text-anchor="middle">FP32: 282.6 KB | 推理 ~2ms</text>
+
+  <!-- Video Demo -->
+  <rect x="775" y="600" width="200" height="55" rx="6" fill="#0f172a"/>
+  <rect x="775" y="600" width="200" height="55" rx="6" fill="rgba(76,29,149,0.3)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="875" y="622" fill="white" font-size="10" font-weight="600" text-anchor="middle">在线演示视频</text>
+  <text x="875" y="640" fill="#64748b" font-size="8" text-anchor="middle">EDF回放→推理→hypnogram</text>
+
+  <!-- ================================================================= -->
+  <!-- Data flow arrows between layers -->
+  <!-- ================================================================= -->
+
+  <!-- brainda → brainflow (arrow from ParaSleep to Worker) -->
+  <path d="M 570 310 L 570 370" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-amber)" stroke-dasharray="6,3"/>
+  <text x="582" y="342" fill="#fbbf24" font-size="8">模型权重加载</text>
+
+  <!-- brainflow → brainstim (arrow from Worker to Monitor) -->
+  <path d="M 570 545 L 570 592" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-amber)" stroke-dasharray="6,3"/>
+  <text x="582" y="572" fill="#fbbf24" font-size="8">LSL 预测输出</text>
+
+  <!-- ================================================================= -->
+  <!-- Bottom specs bar -->
+  <!-- ================================================================= -->
+  <rect x="30" y="742" width="1040" height="36" rx="6" fill="#0f172a" stroke="#334155" stroke-width="0.8"/>
+  <text x="550" y="765" fill="#64748b" font-size="9" text-anchor="middle">单通道 Fpz-Cz EEG | 30s / epoch | ctx=3 causal 上下文窗口 | 131,885 参数 | ONNX 282.6 KB | 推理 ~2ms/epoch</text>
+
+  <!-- ================================================================= -->
+  <!-- Legend -->
+  <!-- ================================================================= -->
+  <rect x="30" y="788" width="1040" height="25" rx="4" fill="#0f172a"/>
+  <text x="55" y="805" fill="#94a3b8" font-size="8">图例:</text>
+  <rect x="100" y="796" width="14" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
+  <text x="120" y="805" fill="#64748b" font-size="7">brainda</text>
+  <rect x="180" y="796" width="14" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+  <text x="200" y="805" fill="#64748b" font-size="7">brainflow</text>
+  <rect x="268" y="796" width="14" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
+  <text x="288" y="805" fill="#64748b" font-size="7">brainstim</text>
+  <text x="360" y="805" fill="#fbbf24" font-size="7">★ 核心创新模块</text>
+  <line x1="450" y1="801" x2="500" y2="801" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="508" y="805" fill="#64748b" font-size="7">跨层数据流</text>
+  <text x="650" y="805" fill="#64748b" font-size="7">橙色=BaseParadigm/BaseAmplifier/ProcessWorker 基类扩展</text>
+</svg>

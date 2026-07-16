@@ -79,8 +79,20 @@ class SleepEDFDataset(BaseDataset):
             paradigm="sleep",
         )
 
+    @staticmethod
+    def parse_record_id(record_id: str):
+        """Parse Sleep Cassette record ID into (subject_id, night).
+
+        Sleep Cassette format: SC4ssNE0 where ss=subject (00-82), N=night (1-2).
+        Example: "4001" → ("00", "1"), "4002" → ("00", "2"), "4101" → ("01", "1").
+        """
+        s = str(record_id)
+        if len(s) >= 3:
+            return (s[1:3], s[3:4]) if len(s) == 4 else (s, "1")
+        return (s, "1")
+
     def _discover_subjects(self) -> List[str]:
-        """Scan data_root for available subject IDs."""
+        """Scan data_root for available record IDs (SC4ssNE0 format)."""
         subjects = set()
 
         for fname in os.listdir(self.data_root):
@@ -88,6 +100,14 @@ class SleepEDFDataset(BaseDataset):
             if match:
                 subjects.add(match.group(1))
         return sorted(subjects)
+
+    def get_real_subject_ids(self) -> List[str]:
+        """Return unique real subject IDs (without night suffix)."""
+        real_ids = set()
+        for rid in self.subjects:
+            sid, _ = self.parse_record_id(rid)
+            real_ids.add(sid)
+        return sorted(real_ids)
 
     def _find_files(self, subject: str) -> Tuple[str, str]:
         """Find PSG and Hypnogram files for a given subject ID."""
@@ -165,6 +185,8 @@ class SleepEDFDataset(BaseDataset):
             raise RuntimeError(f"No valid sleep stages found for subject {subject}")
 
         events = np.array(events)
+        # Ensure strict chronological order (defensive, annotations are already sorted)
+        events = events[events[:, 0].argsort()]
 
         # Write events as integer-coded annotations so BaseParadigm can parse them.
         # BaseParadigm calls mne.events_from_annotations(raw, event_id=lambda x: int(x)),

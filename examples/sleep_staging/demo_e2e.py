@@ -300,7 +300,6 @@ try:
         if len(epoch_buffer) >= 3000:
             epoch_data = epoch_buffer[:3000]
             epoch_buffer = epoch_buffer[3000:]
-            epoch_data = [[v*1e6, t] for v, t in epoch_data]
             worker.consume(epoch_data)
 
         stages_display = [p for p in worker.predictions if p >= 0]
