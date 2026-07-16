@@ -170,11 +170,6 @@ def load_cache_subjects(cache_dir, context, causal, label_mode='5class'):
     return sorted(subs)
 
 def build_cache(data_root, cache_dir, context, causal):
-    existing = load_cache_subjects(cache_dir, context, causal)
-    if len(existing) > 0:
-        print(f"  Cache exists: {len(existing)} records (ctx={context} {MODE}, {CACHE_VERSION})")
-        return
-
     print(f"  Building cache (ctx={context} {MODE}, {CACHE_VERSION}) from raw EDF...")
     from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
 
@@ -182,14 +177,14 @@ def build_cache(data_root, cache_dir, context, causal):
     dataset = SleepEDFDataset(data_root, channel='EEG Fpz-Cz')
     paradigm = _get_paradigm()
 
+    done, skipped, failed = 0, 0, 0
     for subj_id in dataset.subjects:
         path = os.path.join(cache_dir, cache_filename(subj_id, context, causal))
         if os.path.exists(path):
+            skipped += 1
             continue
         try:
             # Load raw data directly (bypass BaseParadigm event-class grouping)
-            dests = dataset.data_path(subj_id)[0]
-            psg_path = dests[0]
             raw = dataset._get_single_subject_data(subj_id)
             raw_data = raw['session_0']['run_0']
             sfreq = raw_data.info['sfreq']
@@ -203,10 +198,27 @@ def build_cache(data_root, cache_dir, context, causal):
 
             # Build context windows
             Xw, yw = paradigm.build_windows(X, y)
-            np.savez_compressed(path, X=Xw, y=yw)
+
+            # Save with metadata
+            real_id = _real_subject_id(subj_id)
+            np.savez_compressed(
+                path, X=Xw, y=yw,
+                record_id=str(subj_id), subject_id=real_id,
+                cache_version=CACHE_VERSION,
+                context=context, causal=causal,
+                preprocess="0.5-40Hz_100Hz_uV_noNorm",
+            )
+            done += 1
         except (ValueError, RuntimeError) as e:
-            pass
-    print(f"  Cache built: {len(load_cache_subjects(cache_dir, context, causal))} records")
+            print(f"  [FAILED] record={subj_id}: {type(e).__name__}: {e}")
+            failed += 1
+
+    print(f"  Cache done: {done} built, {skipped} skipped, {failed} failed")
+    if done == 0 and skipped == 0:
+        raise RuntimeError(
+            "No chronov2 caches built or found. "
+            "Check extraction errors above and verify data_root path."
+        )
 
 
 def load_windows(subjects, cache_dir, context, causal):

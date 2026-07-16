@@ -67,10 +67,12 @@ if DEMO_MODE == "cache":
     # Try new naming first, fall back to old patterns
     ctx = DEMO_CONTEXT
     if DEMO_CAUSAL:
-        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_causal_5class.npz',
+        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_causal_5class_chronov2.npz',
+                       f'*_FpzCz_sr100_ctx{ctx}_causal_5class.npz',
                        f'*_ctx{ctx}_causal.npz']
     else:
-        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_center_5class.npz',
+        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_center_5class_chronov2.npz',
+                       f'*_FpzCz_sr100_ctx{ctx}_center_5class.npz',
                        f'*_ctx{ctx}_center.npz',
                        '*.npz']
     for pat in search_pats:
@@ -87,11 +89,13 @@ if DEMO_MODE == "cache":
     cache_path = None
     if DEMO_CAUSAL:
         cache_candidates = [
+            os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_causal_5class_chronov2.npz'),
             os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_causal_5class.npz'),
             os.path.join(cache_dir, f'{sub}_ctx{ctx}_causal.npz'),
         ]
     else:
         cache_candidates = [
+            os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class_chronov2.npz'),
             os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class.npz'),
             os.path.join(cache_dir, f'{sub}_ctx{ctx}_center.npz'),
             os.path.join(cache_dir, f'{sub}.npz'),

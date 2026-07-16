@@ -115,13 +115,14 @@ class SleepParadigm(BaseParadigm):
 
         X_list, y_list, onset_list = [], [], []
         for a in annot:
-            stage_id = getattr(self, '_stage_map', {}).get(
-                a["description"], -1)
-            if stage_id == -1:
-                # Try SleepEDFDataset STAGE_MAP
+            desc = str(a["description"]).strip()
+            # Support both digit labels ("0"-"4") and text labels ("Sleep stage W", etc.)
+            if desc.lstrip("-").isdigit():
+                stage_id = int(desc)
+            else:
                 from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
-                stage_id = SleepEDFDataset.STAGE_MAP.get(a["description"], -1)
-            if stage_id == -1:
+                stage_id = SleepEDFDataset.STAGE_MAP.get(desc, -1)
+            if stage_id not in (0, 1, 2, 3, 4):
                 continue
             n_epochs = int(a["duration"] // epoch_sec)
             for i in range(n_epochs):

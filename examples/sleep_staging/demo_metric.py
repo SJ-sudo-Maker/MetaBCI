@@ -84,7 +84,13 @@ mode = 'causal' if args.causal else 'center'
 # If --split provided, use exact test subjects from training
 if args.split and os.path.exists(args.split):
     split_data = np.load(args.split, allow_pickle=True)
-    test_subs = set(map(str, split_data['test_subs'].tolist()))
+    # Support both old ("test_subs") and new ("test_records", "test_subjects") formats
+    if "test_records" in split_data:
+        test_subs = set(map(str, split_data['test_records'].tolist()))
+    elif "test_subs" in split_data:
+        test_subs = set(map(str, split_data['test_subs'].tolist()))
+    else:
+        raise KeyError(f"Split file {args.split} missing 'test_records' or 'test_subs'")
     print(f"  Using split file: {args.split} ({len(test_subs)} test subjects)")
 else:
     test_subs = None
@@ -93,11 +99,13 @@ import glob
 mode = 'causal' if args.causal else 'center'
 if args.causal:
     patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov2.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
         f'*_ctx{args.context}_{mode}.npz',
     ]
 else:
     patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov2.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
         f'*_ctx{args.context}_{mode}.npz',
         f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
