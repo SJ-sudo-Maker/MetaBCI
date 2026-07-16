@@ -185,14 +185,19 @@ class SleepEDFDataset(BaseDataset):
             raise RuntimeError(f"No valid sleep stages found for subject {subject}")
 
         events = np.array(events)
-        # Ensure strict chronological order (defensive, annotations are already sorted)
+        # Ensure strict chronological order
         events = events[events[:, 0].argsort()]
 
-        # Write events as integer-coded annotations so BaseParadigm can parse them.
-        # BaseParadigm calls mne.events_from_annotations(raw, event_id=lambda x: int(x)),
-        # which requires annotation descriptions to be integer strings.
-        event_desc = {i: str(i) for i in np.unique(events[:, 2])}
-        annotations = mne.annotations_from_events(events, sfreq=sfreq, event_desc=event_desc)
+        # Create annotations with proper 30s durations per epoch.
+        # Using mne.Annotations directly (not annotations_from_events) ensures
+        # each epoch has duration=30s, which extract_epochs() requires.
+        onsets = events[:, 0].astype(float) / sfreq
+        durations = np.full(len(events), self.epoch_sec, dtype=float)
+        descriptions = [str(e) for e in events[:, 2]]
+        annotations = mne.Annotations(
+            onset=onsets, duration=durations, description=descriptions,
+            orig_time=raw.info.get('meas_date', None)
+        )
         raw.set_annotations(annotations)
 
         return {"session_0": {"run_0": raw}}
