@@ -125,9 +125,11 @@ def _get_paradigm():
 # =============================================================================
 # Cache helpers
 # =============================================================================
-# Cache naming: {sub}_FpzCz_sr100_ctx{context}_{mode}_{label}.npz
-# Encodes channel, srate, context, mode, and label_mode to prevent
-# cross-experiment cache pollution.
+# Cache version — bump after any change to data extraction, preprocessing, or
+# subject-ID parsing. Old caches MUST NOT be reused across versions.
+CACHE_VERSION = "chronov2"
+
+# Cache naming: {sub}_FpzCz_sr100_ctx{context}_{mode}_{label}_{version}.npz
 
 # Map Sleep Cassette record IDs (e.g. "4001", "4002") to real subject IDs (e.g. "00").
 # SC4ssNE0: ss=subject (00-82), N=night (1-2). Same subject's nights must stay together.
@@ -138,27 +140,24 @@ def _real_subject_id(record_id):
 
 def cache_filename(sub, context, causal, label_mode='5class'):
     mode = 'causal' if causal else 'center'
-    return f'{sub}_FpzCz_sr100_ctx{context}_{mode}_{label_mode}.npz'
+    return f'{sub}_FpzCz_sr100_ctx{context}_{mode}_{label_mode}_{CACHE_VERSION}.npz'
 
 def cache_name_suffix(context, causal, label_mode='5class'):
     mode = 'causal' if causal else 'center'
-    return f'_FpzCz_sr100_ctx{context}_{mode}_{label_mode}.npz'
+    return f'_FpzCz_sr100_ctx{context}_{mode}_{label_mode}_{CACHE_VERSION}.npz'
 
 def find_cache(sub, cache_dir, context, causal, label_mode='5class'):
-    """Try current naming, fall back to legacy patterns."""
+    """Find cache file. Only accepts chronov2 format — NO fallback to old caches."""
     path = os.path.join(cache_dir, cache_filename(sub, context, causal, label_mode))
-    if os.path.exists(path):
-        return path
-    # Fallback 1: old _ctx naming (no channel/srate/label)
-    old = os.path.join(cache_dir, f'{sub}_ctx{context}_{"causal" if causal else "center"}.npz')
-    if os.path.exists(old):
-        return old
-    # Fallback 2: ancient naming {sub}.npz (ctx=3 center only)
-    if context == 3 and not causal:
-        ancient = os.path.join(cache_dir, f'{sub}.npz')
-        if os.path.exists(ancient):
-            return ancient
-    return None
+    return path if os.path.exists(path) else None
+
+def build_subject_records_map(record_ids):
+    """Build real-subject-ID → list-of-record-IDs mapping."""
+    mapping = {}
+    for rid in record_ids:
+        sid = _real_subject_id(rid)
+        mapping.setdefault(sid, []).append(rid)
+    return mapping
 
 def load_cache_subjects(cache_dir, context, causal, label_mode='5class'):
     if not os.path.isdir(cache_dir):
@@ -173,29 +172,41 @@ def load_cache_subjects(cache_dir, context, causal, label_mode='5class'):
 def build_cache(data_root, cache_dir, context, causal):
     existing = load_cache_subjects(cache_dir, context, causal)
     if len(existing) > 0:
-        print(f"  Cache exists: {len(existing)} subjects (ctx={context} {MODE})")
+        print(f"  Cache exists: {len(existing)} records (ctx={context} {MODE}, {CACHE_VERSION})")
         return
 
-    print(f"  Building cache (ctx={context} {MODE}) from raw EDF...")
+    print(f"  Building cache (ctx={context} {MODE}, {CACHE_VERSION}) from raw EDF...")
     from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
 
     os.makedirs(cache_dir, exist_ok=True)
     dataset = SleepEDFDataset(data_root, channel='EEG Fpz-Cz')
     paradigm = _get_paradigm()
 
-    for s in dataset.subjects:
-        path = os.path.join(cache_dir, cache_filename(s, context, causal))
+    for subj_id in dataset.subjects:
+        path = os.path.join(cache_dir, cache_filename(subj_id, context, causal))
         if os.path.exists(path):
             continue
         try:
-            X, y, _ = paradigm.get_data(dataset, subjects=[s],
-                                         return_concat=True, n_jobs=1)
-            X, y = X.astype(np.float32), y.astype(np.int64)
+            # Load raw data directly (bypass BaseParadigm event-class grouping)
+            dests = dataset.data_path(subj_id)[0]
+            psg_path = dests[0]
+            raw = dataset._get_single_subject_data(subj_id)
+            raw_data = raw['session_0']['run_0']
+            sfreq = raw_data.info['sfreq']
+
+            # Apply 0.5-40 Hz bandpass filter (unified preprocessing)
+            raw_data.filter(0.5, 40, picks='eeg', verbose=False)
+
+            # Extract epochs in strict chronological order
+            X, y, onsets = paradigm.extract_epochs(
+                raw_data, raw_data.annotations, sfreq, dataset.epoch_sec)
+
+            # Build context windows
             Xw, yw = paradigm.build_windows(X, y)
             np.savez_compressed(path, X=Xw, y=yw)
-        except (ValueError, RuntimeError):
+        except (ValueError, RuntimeError) as e:
             pass
-    print(f"  Cache built: {len(load_cache_subjects(cache_dir, context, causal))} subjects")
+    print(f"  Cache built: {len(load_cache_subjects(cache_dir, context, causal))} records")
 
 
 def load_windows(subjects, cache_dir, context, causal):
@@ -409,33 +420,49 @@ print(f'ParaSleep Training — ctx={args.context} {MODE} | model={args.model}')
 print('=' * 60)
 
 build_cache(args.data, args.cache, args.context, args.causal)
-all_subs = load_cache_subjects(args.cache, args.context, args.causal)
-print(f'Cached subjects: {len(all_subs)}')
+all_records = load_cache_subjects(args.cache, args.context, args.causal)
+print(f'Cached records: {len(all_records)}')
+
+# Build real-subject → records mapping (SC4001,SC4002 → both belong to subject "00")
+subject_to_records = build_subject_records_map(all_records)
+real_subjects = sorted(subject_to_records.keys())
+print(f'Real subjects: {len(real_subjects)} (from {len(all_records)} records)')
 
 rng = np.random.RandomState(42)
-rng.shuffle(all_subs)
+rng.shuffle(real_subjects)
 
-total_needed = args.subjects + args.test
-if len(all_subs) < total_needed:
-    args.subjects = len(all_subs) - args.test
-    print(f'WARNING: Only {len(all_subs)} subjects, using {args.subjects}+{args.test}')
+# Split by REAL subject IDs (nights from same subject stay together)
+n_train_subjects = min(args.subjects, len(real_subjects) - args.test)
+n_test_subjects = args.test
 
-train_subs = all_subs[:args.subjects]
-test_subs = all_subs[args.subjects:args.subjects + args.test]
+train_subjects = set(real_subjects[:n_train_subjects])
+test_subjects = set(real_subjects[n_train_subjects:n_train_subjects + n_test_subjects])
 
-# Save subject split for consistent evaluation
+# Expand subjects → record IDs for cache loading
+train_records = [r for s in train_subjects for r in subject_to_records[s]]
+test_records = [r for s in test_subjects for r in subject_to_records[s]]
+
+# Assert disjoint
+assert train_subjects.isdisjoint(test_subjects), \
+    "Train/test subject overlap detected!"
+print(f'Disjoint check: OK')
+
+# Save split (both subject IDs and record IDs)
 os.makedirs(os.path.dirname(args.save) or '.', exist_ok=True)
 np.savez(args.save.replace('.pth', '_split.npz'),
-         train_subs=np.array(train_subs), test_subs=np.array(test_subs))
+         train_subjects=np.array(list(train_subjects)),
+         test_subjects=np.array(list(test_subjects)),
+         train_records=np.array(train_records),
+         test_records=np.array(test_records))
 print(f'Split saved: {args.save.replace(".pth", "_split.npz")}')
 
-print(f'Loading {len(train_subs)}+{len(test_subs)} subjects...')
-X_all, y_all, subj_all = load_windows(train_subs + test_subs, args.cache,
+print(f'Loading {len(train_records)} train + {len(test_records)} test records...')
+X_all, y_all, subj_all = load_windows(train_records + test_records, args.cache,
                                        args.context, args.causal)
 
 if args.cv > 1:
     print(f'\nRunning {args.cv}-fold subject-wise CV...')
-    unique_subs = np.unique(subj_all)
+    unique_subs = np.unique(subj_all)  # real subject IDs
     rng.shuffle(unique_subs)
     fold_size = len(unique_subs) // args.cv
 
@@ -445,6 +472,7 @@ if args.cv > 1:
         t_end = (fold + 1) * fold_size if fold < args.cv - 1 else len(unique_subs)
         test_set = set(unique_subs[t_start:t_end])
         train_set = set(unique_subs) - test_set
+        assert train_set.isdisjoint(test_set), f"Fold {fold}: overlap detected!"
         tr_mask = np.array([s in train_set for s in subj_all])
         te_mask = np.array([s in test_set for s in subj_all])
 
@@ -466,11 +494,10 @@ if args.cv > 1:
           f"+- {np.std([f['macro_f1'] for f in all_folds])*100:.2f}%")
 
 else:
-    print(f'\nTraining: {args.subjects} subjects, {args.epochs} epochs')
-    train_set = set(train_subs)
-    test_set = set(test_subs)
-    tr_mask = np.array([s in train_set for s in subj_all])
-    te_mask = np.array([s in test_set for s in subj_all])
+    print(f'\nTraining: {n_train_subjects} real subjects '
+          f'({len(train_records)} records), {args.epochs} epochs')
+    tr_mask = np.array([s in train_subjects for s in subj_all])
+    te_mask = np.array([s in test_subjects for s in subj_all])
 
     result = train_fold(X_all[tr_mask], y_all[tr_mask], subj_all[tr_mask],
                         X_all[te_mask], y_all[te_mask])

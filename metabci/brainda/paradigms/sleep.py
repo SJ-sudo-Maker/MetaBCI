@@ -84,6 +84,70 @@ class SleepParadigm(BaseParadigm):
         return getattr(dataset, "paradigm", None) == "sleep"
 
     # ------------------------------------------------------------------
+    # Chronological epoch extraction
+    # ------------------------------------------------------------------
+
+    def extract_epochs(self, raw, annot, sfreq: float, epoch_sec: int = 30):
+        """Extract epochs in strict chronological order from annotations.
+
+        Unlike BaseParadigm.get_data() which groups epochs by event class,
+        this preserves the original sleep timeline (crucial for context windows).
+
+        Parameters
+        ----------
+        raw : mne.io.Raw
+            Pre-loaded continuous EEG (single channel).
+        annot : mne.Annotations
+            Sleep stage annotations from Hypnogram.
+        sfreq : float
+            Sampling frequency.
+        epoch_sec : int
+            Epoch duration in seconds.
+
+        Returns
+        -------
+        X : ndarray (n_epochs, n_channels, n_samples)
+        y : ndarray (n_epochs,)
+        onsets : ndarray (n_epochs,)
+        """
+        data = raw.get_data()  # (n_channels, n_samples)
+        epoch_samples = int(epoch_sec * sfreq)
+
+        X_list, y_list, onset_list = [], [], []
+        for a in annot:
+            stage_id = getattr(self, '_stage_map', {}).get(
+                a["description"], -1)
+            if stage_id == -1:
+                # Try SleepEDFDataset STAGE_MAP
+                from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
+                stage_id = SleepEDFDataset.STAGE_MAP.get(a["description"], -1)
+            if stage_id == -1:
+                continue
+            n_epochs = int(a["duration"] // epoch_sec)
+            for i in range(n_epochs):
+                onset_sec = a["onset"] + i * epoch_sec
+                start_sample = int(onset_sec * sfreq)
+                end_sample = start_sample + epoch_samples
+                if end_sample > data.shape[1]:
+                    break
+                epoch_data = data[:, start_sample:end_sample]
+                X_list.append(epoch_data)
+                y_list.append(stage_id)
+                onset_list.append(onset_sec)
+
+        if len(X_list) == 0:
+            raise RuntimeError("No valid epochs extracted")
+
+        X = np.stack(X_list).astype(np.float32)  # (n, ch, samples)
+        y = np.array(y_list, dtype=np.int64)
+        onsets = np.array(onset_list)
+
+        # Verify strict chronological order
+        assert np.all(np.diff(onsets) > 0), \
+            "Epochs are not in strict chronological order!"
+        return X, y, onsets
+
+    # ------------------------------------------------------------------
     # Context window construction
     # ------------------------------------------------------------------
 
