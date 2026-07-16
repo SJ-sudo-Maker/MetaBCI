@@ -113,6 +113,22 @@ class SleepParadigm(BaseParadigm):
         data = raw.get_data()  # (n_channels, n_samples)
         epoch_samples = int(epoch_sec * sfreq)
 
+        # Debug: print first 5 annotation descriptions for diagnosis
+        desc_samples = []
+        for i, a in enumerate(annot):
+            d = str(a["description"]) if hasattr(a, '__getitem__') else str(a)
+            desc_samples.append(d)
+            if i < 5:
+                print(f"  [DEBUG] annotation[{i}]: onset={a['onset']:.0f}s, "
+                      f"duration={a['duration']:.0f}s, desc='{d}'")
+        if len(desc_samples) == 0:
+            raise RuntimeError(
+                "No annotations found on Raw object. "
+                "Hypnogram annotations may not have been loaded correctly."
+            )
+        unique_descs = set(desc_samples)
+        print(f"  [DEBUG] Unique annotation descriptions: {unique_descs}")
+
         X_list, y_list, onset_list = [], [], []
         for a in annot:
             desc = str(a["description"]).strip()
