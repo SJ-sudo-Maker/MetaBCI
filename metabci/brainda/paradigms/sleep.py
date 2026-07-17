@@ -110,7 +110,7 @@ class SleepParadigm(BaseParadigm):
         y : ndarray (n_epochs,)
         onsets : ndarray (n_epochs,)
         """
-        data = raw.get_data()  # (n_channels, n_samples)
+        data = raw.get_data() * 1e6  # V → μV (n_channels, n_samples)
         epoch_samples = int(epoch_sec * sfreq)
 
         X_list, y_list, onset_list = [], [], []

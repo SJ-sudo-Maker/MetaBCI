@@ -127,7 +127,7 @@ def _get_paradigm():
 # =============================================================================
 # Cache version — bump after any change to data extraction, preprocessing, or
 # subject-ID parsing. Old caches MUST NOT be reused across versions.
-CACHE_VERSION = "chronov2"
+CACHE_VERSION = "chronov3"
 
 # Cache naming: {sub}_FpzCz_sr100_ctx{context}_{mode}_{label}_{version}.npz
 
@@ -206,7 +206,7 @@ def build_cache(data_root, cache_dir, context, causal):
                 record_id=str(subj_id), subject_id=real_id,
                 cache_version=CACHE_VERSION,
                 context=context, causal=causal,
-                preprocess="0.5-40Hz_100Hz_uV_noNorm",
+                preprocess="0.5-40Hz_100Hz_uV_noNorm_chronov3",
             )
             done += 1
         except (ValueError, RuntimeError) as e:
