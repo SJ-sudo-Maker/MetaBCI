@@ -129,13 +129,20 @@ class SleepStagingPipeline:
         mode = "causal" if causal else "center"
         label_mode = self.cfg.get("label_mode", "5class")
 
-        # Discover records
-        pattern = f"*_FpzCz_sr100_ctx{ctx}_{mode}_{label_mode}_{cache_version}.npz"
+        # Discover records by exact pattern
+        import glob
+        pattern = os.path.join(cache_dir,
+            f"*_FpzCz_sr100_ctx{ctx}_{mode}_{label_mode}_{cache_version}.npz")
         all_records = sorted(set(
-            f.replace(f"_FpzCz_sr100_ctx{ctx}_{mode}_{label_mode}_{cache_version}.npz", "")
-            for f in os.listdir(cache_dir)
-            if f.endswith(f"_{cache_version}.npz")
+            os.path.basename(f).replace(
+                f"_FpzCz_sr100_ctx{ctx}_{mode}_{label_mode}_{cache_version}.npz", "")
+            for f in glob.glob(pattern)
         ))
+        if len(all_records) == 0:
+            raise RuntimeError(
+                f"No {cache_version} caches found in {cache_dir}. "
+                f"Expected pattern: {pattern}. Run 'prepare' first."
+            )
 
         # Build subject→records mapping
         subj_to_records = {}
@@ -149,19 +156,25 @@ class SleepStagingPipeline:
 
         n_train = self.cfg.get("train_subjects", 68)
         n_test = self.cfg.get("test_subjects", 10)
-        train_subjects = set(real_subjects[:n_train])
-        test_subjects = set(real_subjects[n_train:n_train + n_test])
+        required = n_train + n_test
+        if len(real_subjects) < required:
+            raise RuntimeError(
+                f"Need {required} real subjects, found {len(real_subjects)}. "
+                f"Check cache completeness in {cache_dir}."
+            )
+        train_subjects = sorted(real_subjects[:n_train])
+        test_subjects = sorted(real_subjects[n_train:n_train + n_test])
 
-        assert train_subjects.isdisjoint(test_subjects), "Train/test overlap!"
+        assert set(train_subjects).isdisjoint(test_subjects), "Train/test overlap!"
 
         train_records = [r for s in train_subjects for r in subj_to_records[s]]
         test_records = [r for s in test_subjects for r in subj_to_records[s]]
 
         self._split = {
-            "train_subjects": list(train_subjects),
-            "test_subjects": list(test_subjects),
-            "train_records": train_records,
-            "test_records": test_records,
+            "train_subjects": train_subjects,
+            "test_subjects": test_subjects,
+            "train_records": sorted(train_records),
+            "test_records": sorted(test_records),
             "subject_to_records": subj_to_records,
         }
         print(f"Split: {len(train_subjects)} train subjects ({len(train_records)} records) "
@@ -174,7 +187,6 @@ class SleepStagingPipeline:
 
     def train(self):
         """Train ParaSleep model using pre-built caches."""
-        from . import torch as _torch  # avail in pipeline context
         from metabci.brainda.algorithms.deep_learning.parasleep import ParaSleep
         from torch.utils.data import DataLoader, TensorDataset
         from sklearn.metrics import f1_score

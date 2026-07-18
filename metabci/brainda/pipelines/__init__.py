@@ -1,1 +1,3 @@
-__init__.py placeholder
+from .sleep_staging import SleepStagingPipeline
+
+__all__ = ["SleepStagingPipeline"]

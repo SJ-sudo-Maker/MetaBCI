@@ -22,13 +22,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from metabci.brainda.pipelines.sleep_staging import SleepStagingPipeline
 
 
+def _resolve_path(cli_val, env_key, default):
+    """Resolve path: CLI arg > env var > default."""
+    val = cli_val if cli_val is not None else None
+    if val is None:
+        val = os.environ.get(env_key)
+    return val if val else default
+
 def _build_config(args):
     """Build pipeline config dict from CLI args."""
+    device = getattr(args, 'device', 'auto')
+    if device == 'auto':
+        import torch
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
     return {
-        "data_root": getattr(args, 'data', os.environ.get("SLEEP_DATA",
-            r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette")),
-        "cache_dir": getattr(args, 'cache', os.environ.get("SLEEP_CACHE",
-            r"F:\sleep_cache_chronov3")),
+        "data_root": _resolve_path(
+            getattr(args, 'data', None), "SLEEP_DATA",
+            r"F:\sleep-edf\sleep-edf-database-expanded-1.0.0\sleep-cassette"),
+        "cache_dir": _resolve_path(
+            getattr(args, 'cache', None), "SLEEP_CACHE",
+            r"F:\sleep_cache_chronov3"),
         "context": getattr(args, 'context', 3),
         "causal": getattr(args, 'causal', True),
         "label_mode": "5class",
@@ -37,12 +50,13 @@ def _build_config(args):
         "batch_size": getattr(args, 'batch', 128),
         "lr": getattr(args, 'lr', 1e-3),
         "wd": getattr(args, 'wd', 1e-2),
-        "device": getattr(args, 'device', 'cuda'),
+        "device": device,
         "cache_version": "chronov3",
         "seed": 42,
         "train_subjects": getattr(args, 'subjects', 68),
         "test_subjects": getattr(args, 'test', 10),
-        "save_path": getattr(args, 'save', 'parasleep_best.pth'),
+        "save_path": _resolve_path(
+            getattr(args, 'save', None), None, 'parasleep_best.pth'),
     }
 
 
