@@ -309,6 +309,8 @@ def main():
     cache_dir = str(_PROJECT_ROOT / args.cache) if not Path(args.cache).is_absolute() else args.cache
     # Try new naming first, fall back to old patterns
     patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode_str}_5class_chronov3.npz',
+        f'*_FpzCz_sr100_ctx{args.context}_{mode_str}_5class_chronov2.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode_str}_5class.npz',
         f'*_ctx{args.context}_{mode_str}.npz',
         f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',

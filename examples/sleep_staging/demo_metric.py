@@ -99,12 +99,14 @@ import glob
 mode = 'causal' if args.causal else 'center'
 if args.causal:
     patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov3.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov2.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
         f'*_ctx{args.context}_{mode}.npz',
     ]
 else:
     patterns = [
+        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov3.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov2.npz',
         f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
         f'*_ctx{args.context}_{mode}.npz',
@@ -174,8 +176,10 @@ kappa = cohen_kappa_score(y_true, y_pred)
 per_class_f1 = f1_score(y_true, y_pred, average=None, labels=LABELS_5, zero_division=0)
 cm = confusion_matrix(y_true, y_pred, labels=LABELS_5)
 
+n_records = len(test_files)
+n_subjects = len(set(os.path.basename(f).split('_')[0].replace('.npz','') for f in test_files))
 print(f"\n{'='*60}")
-print(f"RESULTS — {len(test_files)} test subjects, {len(y_true)} epochs")
+print(f"RESULTS — {n_subjects} test subjects ({n_records} records), {len(y_true)} epochs")
 print(f"{'='*60}")
 print(f"Accuracy:     {acc*100:.2f}%")
 print(f"Macro F1:     {macro_f1:.4f}")
@@ -206,7 +210,8 @@ with open(csv_path, 'w') as f:
     for i, name in enumerate(CLASS_NAMES):
         f.write(f"F1_{name},{per_class_f1[i]:.6f}\n")
     f.write(f"Test_Epochs,{len(y_true)}\n")
-    f.write(f"Test_Subjects,{len(test_files)}\n")
+    f.write(f"Test_Subjects,{n_subjects}\n")
+    f.write(f"Test_Records,{n_records}\n")
 print(f"\nSaved: {csv_path}")
 
 report_path = os.path.join(args.out, 'classification_report.csv')

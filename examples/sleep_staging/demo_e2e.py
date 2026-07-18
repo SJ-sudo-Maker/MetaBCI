@@ -67,11 +67,13 @@ if DEMO_MODE == "cache":
     # Try new naming first, fall back to old patterns
     ctx = DEMO_CONTEXT
     if DEMO_CAUSAL:
-        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_causal_5class_chronov2.npz',
+        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_causal_5class_chronov3.npz',
+                       f'*_FpzCz_sr100_ctx{ctx}_causal_5class_chronov2.npz',
                        f'*_FpzCz_sr100_ctx{ctx}_causal_5class.npz',
                        f'*_ctx{ctx}_causal.npz']
     else:
-        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_center_5class_chronov2.npz',
+        search_pats = [f'*_FpzCz_sr100_ctx{ctx}_center_5class_chronov3.npz',
+                       f'*_FpzCz_sr100_ctx{ctx}_center_5class_chronov2.npz',
                        f'*_FpzCz_sr100_ctx{ctx}_center_5class.npz',
                        f'*_ctx{ctx}_center.npz',
                        '*.npz']
@@ -89,12 +91,14 @@ if DEMO_MODE == "cache":
     cache_path = None
     if DEMO_CAUSAL:
         cache_candidates = [
+            os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_causal_5class_chronov3.npz'),
             os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_causal_5class_chronov2.npz'),
             os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_causal_5class.npz'),
             os.path.join(cache_dir, f'{sub}_ctx{ctx}_causal.npz'),
         ]
     else:
         cache_candidates = [
+            os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class_chronov3.npz'),
             os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class_chronov2.npz'),
             os.path.join(cache_dir, f'{sub}_FpzCz_sr100_ctx{ctx}_center_5class.npz'),
             os.path.join(cache_dir, f'{sub}_ctx{ctx}_center.npz'),
@@ -343,7 +347,12 @@ try:
                 fontsize=12, fontweight="bold"
             )
 
-            true = player.get_true_stage_at(n - 1)
+            # Use worker's epoch index tracking for correct truth alignment
+            if hasattr(worker, 'prediction_epoch_indices') and worker.prediction_epoch_indices:
+                true_idx = worker.prediction_epoch_indices[-1]
+            else:
+                true_idx = n - 1
+            true = player.get_true_stage_at(true_idx)
             if true >= 0:
                 color_true = STAGE_COLORS.get(true, "#888")
                 correct = "[OK]" if true == stages_display[-1] else "[X]"
@@ -369,7 +378,11 @@ finally:
 
     print(f"\nDemo finished: {len(stages_display)} epochs processed.")
 
-    truth = [player.get_true_stage_at(i) for i in range(len(stages_display))]
+    # Use worker's epoch index tracking for correct truth alignment
+    if hasattr(worker, 'prediction_epoch_indices') and worker.prediction_epoch_indices:
+        truth = [player.get_true_stage_at(idx) for idx in worker.prediction_epoch_indices]
+    else:
+        truth = [player.get_true_stage_at(i) for i in range(len(stages_display))]
     correct = sum(1 for p, t in zip(stages_display, truth) if p == t >= 0)
     n_valid = sum(1 for t in truth if t >= 0)
     if n_valid > 0:

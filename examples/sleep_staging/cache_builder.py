@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Build per-subject cache of pre-processed context windows.
+DEPRECATED: Use train_server.py for cache building instead.
 
-Run once — training scripts then load from cache instead of re-reading EDF.
-Output: {cache_dir}/{sub}_ctx{context}_{mode}.npz
+This script uses BaseParadigm.get_data() which groups epochs by event class,
+breaking chronological order. Use train_server.py which calls
+SleepParadigm.extract_epochs() directly for correct temporal ordering.
 
 Usage:
     python cache_builder.py                          # ctx=3 center
     python cache_builder.py --context 5              # ctx=5 center
     python cache_builder.py --context 3 --causal     # ctx=3 causal
 """
+import warnings
+warnings.warn("cache_builder.py is deprecated. Use train_server.py for chronov3 caches.",
+              DeprecationWarning, stacklevel=2)
 import sys, os, argparse
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))

@@ -99,6 +99,7 @@ class SleepOnlineWorker(ProcessWorker):
         self.signal_quality: List[bool] = []
         self.stage_counts: Dict[str, int] = {s: 0 for s in self.stage_names}
         self.epoch_counter: int = 0
+        self.prediction_epoch_indices: List[int] = []
 
         # Optional LSL outlet (created in pre() if lsl is available)
         self.lsl_outlet = None
@@ -232,6 +233,8 @@ class SleepOnlineWorker(ProcessWorker):
         self.predictions.append(pred)
         self.confidences.append(confidence)
         self.stage_counts[self.stage_names[pred]] += 1
+        # Track which raw epoch index this prediction corresponds to
+        self.prediction_epoch_indices.append(self.epoch_counter - 1)
 
         # Push via LSL
         if self.lsl_outlet is not None:
