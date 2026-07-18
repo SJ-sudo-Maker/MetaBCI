@@ -24,10 +24,13 @@ from metabci.brainda.pipelines.sleep_staging import SleepStagingPipeline
 
 def _resolve_path(cli_val, env_key, default):
     """Resolve path: CLI arg > env var > default."""
-    val = cli_val if cli_val is not None else None
-    if val is None:
+    if cli_val:
+        return cli_val
+    if env_key:
         val = os.environ.get(env_key)
-    return val if val else default
+        if val:
+            return val
+    return default
 
 def _build_config(args):
     """Build pipeline config dict from CLI args."""

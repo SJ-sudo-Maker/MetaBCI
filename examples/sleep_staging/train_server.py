@@ -468,28 +468,39 @@ np.savez(args.save.replace('.pth', '_split.npz'),
          test_records=np.array(test_records))
 print(f'Split saved: {args.save.replace(".pth", "_split.npz")}')
 
-print(f'Loading {len(train_records)} train + {len(test_records)} test records...')
-X_all, y_all, subj_all = load_windows(train_records + test_records, args.cache,
-                                       args.context, args.causal)
-
+# Load data: CV uses train_records only; holdout uses both
 if args.cv > 1:
-    print(f'\nRunning {args.cv}-fold subject-wise CV...')
-    unique_subs = np.unique(subj_all)  # real subject IDs
-    rng.shuffle(unique_subs)
-    fold_size = len(unique_subs) // args.cv
+    print(f'\nRunning {args.cv}-fold subject-wise CV on {len(train_records)} train records '
+          f'({n_train_subjects} real subjects)...')
+    # Assert holdout test subjects are NOT in CV
+    X_cv, y_cv, subj_cv = load_windows(train_records, args.cache,
+                                        args.context, args.causal)
+    cv_unique = np.unique(subj_cv)
+    assert test_subjects.isdisjoint(set(cv_unique)), \
+        "Holdout test subjects leaked into CV!"
+    print(f'CV isolation check: OK (holdout test subjects excluded)')
+
+    rng_cv = np.random.RandomState(args.cv_seed if hasattr(args, 'cv_seed') else 42)
+    rng_cv.shuffle(cv_unique)
+    fold_size = len(cv_unique) // args.cv
 
     all_folds = []
     for fold in range(args.cv):
         t_start = fold * fold_size
-        t_end = (fold + 1) * fold_size if fold < args.cv - 1 else len(unique_subs)
-        test_set = set(unique_subs[t_start:t_end])
-        train_set = set(unique_subs) - test_set
-        assert train_set.isdisjoint(test_set), f"Fold {fold}: overlap detected!"
-        tr_mask = np.array([s in train_set for s in subj_all])
-        te_mask = np.array([s in test_set for s in subj_all])
+        t_end = (fold + 1) * fold_size if fold < args.cv - 1 else len(cv_unique)
+        test_set = set(cv_unique[t_start:t_end])
+        train_set = set(cv_unique) - test_set
+        assert train_set.isdisjoint(test_set), f"Fold {fold}: overlap!"
+        tr_mask = np.array([s in train_set for s in subj_cv])
+        te_mask = np.array([s in test_set for s in subj_cv])
 
-        result = train_fold(X_all[tr_mask], y_all[tr_mask], subj_all[tr_mask],
-                            X_all[te_mask], y_all[te_mask], fold_name=str(fold + 1))
+        # Save per-fold checkpoint
+        fold_save = args.save.replace('.pth', f'_fold{fold+1}.pth')
+        old_save = args.save
+        args.save = fold_save
+        result = train_fold(X_cv[tr_mask], y_cv[tr_mask], subj_cv[tr_mask],
+                            X_cv[te_mask], y_cv[te_mask], fold_name=str(fold + 1))
+        args.save = old_save
         all_folds.append(result)
         print(f"  Fold {fold+1} Macro F1: {result['macro_f1']:.4f}")
 
@@ -506,6 +517,10 @@ if args.cv > 1:
           f"+- {np.std([f['macro_f1'] for f in all_folds])*100:.2f}%")
 
 else:
+    # Holdout mode: load both train + test records
+    print(f'Loading {len(train_records)} train + {len(test_records)} test records...')
+    X_all, y_all, subj_all = load_windows(train_records + test_records, args.cache,
+                                           args.context, args.causal)
     print(f'\nTraining: {n_train_subjects} real subjects '
           f'({len(train_records)} records), {args.epochs} epochs')
     tr_mask = np.array([s in train_subjects for s in subj_all])
