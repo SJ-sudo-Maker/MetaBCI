@@ -33,6 +33,17 @@ from sklearn.metrics import classification_report, confusion_matrix, f1_score
 import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
 
 
+def set_global_seed(seed):
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 # =============================================================================
 # CLI
 # =============================================================================
@@ -56,6 +67,8 @@ parser.add_argument('--causal', action='store_true',
 parser.add_argument('--cv', type=int, default=0, help='K-fold CV (0=single run)')
 parser.add_argument('--save', type=str, default='parasleep_best.pth')
 parser.add_argument('--device', type=str, default='cuda')
+parser.add_argument('--seed', type=int, default=42, help='Global random seed')
+parser.add_argument('--cv-seed', type=int, default=42, help='CV fold split seed')
 
 # Angle 2: model variant
 parser.add_argument('--model', type=str, default='parasleep',
@@ -259,12 +272,15 @@ def create_model():
 # Train single fold
 # =============================================================================
 
-def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
+def train_fold(X_train, y_train, subj_train, X_test, y_test,
+               fold_name='', save_path=None):
     global_start = time.time()
+    if save_path is None:
+        save_path = args.save
 
     # === Subject-wise validation split ===
     unique_subs = np.unique(subj_train)
-    rng = np.random.RandomState(42)
+    rng = np.random.RandomState(args.seed)
     rng.shuffle(unique_subs)
     n_val_subs = max(1, int(len(unique_subs) * 0.2))
     val_subs = set(unique_subs[:n_val_subs])
@@ -385,7 +401,7 @@ def train_fold(X_train, y_train, subj_train, X_test, y_test, fold_name=''):
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            torch.save(best_state, args.save)
+            torch.save(best_state, save_path)
 
         if epoch == 1 or epoch % 10 == 0:
             elapsed = time.time() - global_start
@@ -440,7 +456,7 @@ subject_to_records = build_subject_records_map(all_records)
 real_subjects = sorted(subject_to_records.keys())
 print(f'Real subjects: {len(real_subjects)} (from {len(all_records)} records)')
 
-rng = np.random.RandomState(42)
+rng = np.random.RandomState(args.seed)
 rng.shuffle(real_subjects)
 
 # Split by REAL subject IDs (nights from same subject stay together)
@@ -472,7 +488,8 @@ print(f'Split saved: {args.save.replace(".pth", "_split.npz")}')
 if args.cv > 1:
     print(f'\nRunning {args.cv}-fold subject-wise CV on {len(train_records)} train records '
           f'({n_train_subjects} real subjects)...')
-    # Assert holdout test subjects are NOT in CV
+    set_global_seed(args.seed)
+
     X_cv, y_cv, subj_cv = load_windows(train_records, args.cache,
                                         args.context, args.causal)
     cv_unique = np.unique(subj_cv)
@@ -480,29 +497,39 @@ if args.cv > 1:
         "Holdout test subjects leaked into CV!"
     print(f'CV isolation check: OK (holdout test subjects excluded)')
 
-    rng_cv = np.random.RandomState(args.cv_seed if hasattr(args, 'cv_seed') else 42)
+    # Balanced fold split via np.array_split
+    rng_cv = np.random.RandomState(args.cv_seed)
     rng_cv.shuffle(cv_unique)
-    fold_size = len(cv_unique) // args.cv
+    fold_groups = np.array_split(cv_unique, args.cv)
+
+    # Save fold assignments
+    fold_info = {}
+    for i, grp in enumerate(fold_groups):
+        fold_info[f'fold_{i+1}_subjects'] = np.array(sorted(grp))
+    fold_info['holdout_subjects'] = np.array(sorted(test_subjects))
+    fold_info['cv_seed'] = args.cv_seed
+    folds_path = args.save.replace('.pth', '_folds.npz')
+    np.savez(folds_path, **fold_info)
+    print(f'CV folds saved: {folds_path}')
 
     all_folds = []
-    for fold in range(args.cv):
-        t_start = fold * fold_size
-        t_end = (fold + 1) * fold_size if fold < args.cv - 1 else len(cv_unique)
-        test_set = set(cv_unique[t_start:t_end])
-        train_set = set(cv_unique) - test_set
-        assert train_set.isdisjoint(test_set), f"Fold {fold}: overlap!"
+    cv_out_dir = os.path.dirname(args.save) or '.'
+    for fold, fold_subjects in enumerate(fold_groups):
+        test_set = set(fold_subjects.tolist())
+        train_set = set(cv_unique.tolist()) - test_set
         tr_mask = np.array([s in train_set for s in subj_cv])
         te_mask = np.array([s in test_set for s in subj_cv])
 
-        # Save per-fold checkpoint
-        fold_save = args.save.replace('.pth', f'_fold{fold+1}.pth')
-        old_save = args.save
-        args.save = fold_save
+        fold_save = os.path.join(cv_out_dir,
+            os.path.basename(args.save).replace('.pth', f'_fold{fold+1}.pth'))
+        # Per-fold seed for reproducibility
+        set_global_seed(args.seed + fold + 1)
         result = train_fold(X_cv[tr_mask], y_cv[tr_mask], subj_cv[tr_mask],
-                            X_cv[te_mask], y_cv[te_mask], fold_name=str(fold + 1))
-        args.save = old_save
+                            X_cv[te_mask], y_cv[te_mask],
+                            fold_name=str(fold + 1), save_path=fold_save)
         all_folds.append(result)
-        print(f"  Fold {fold+1} Macro F1: {result['macro_f1']:.4f}")
+        print(f"  Fold {fold+1} Macro F1: {result['macro_f1']:.4f} "
+              f"({len(fold_subjects)} subjects)")
 
     print(f"\n{'='*60}")
     print("CROSS-VALIDATION RESULTS")
@@ -512,6 +539,26 @@ if args.cv > 1:
     for key, label in zip(keys, labels):
         vals = [f[key] for f in all_folds]
         print(f"  {label:12s}: {np.mean(vals)*100:.2f}% +- {np.std(vals)*100:.2f}%")
+
+    # Save CV metrics
+    import csv, json
+    csv_path = os.path.join(cv_out_dir, 'cv_metrics.csv')
+    with open(csv_path, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(['fold', 'subjects', 'accuracy', 'macro_f1', 'W_f1', 'N1_f1', 'N2_f1', 'N3_f1', 'REM_f1'])
+        for i, r in enumerate(all_folds):
+            w.writerow([i+1, len(fold_groups[i]), r['accuracy'], r['macro_f1'],
+                        r['W_f1'], r['N1_f1'], r['N2_f1'], r['N3_f1'], r['REM_f1']])
+    print(f'CV metrics saved: {csv_path}')
+
+    json_path = os.path.join(cv_out_dir, 'cv_summary.json')
+    mean_vals = {k: float(np.mean([f[k] for f in all_folds])) for k in keys}
+    std_vals = {k: float(np.std([f[k] for f in all_folds])) for k in keys}
+    with open(json_path, 'w') as f:
+        json.dump({'n_folds': args.cv, 'train_subjects': n_train_subjects,
+                    'holdout_subjects': n_test_subjects, 'seed': args.seed,
+                    'cv_seed': args.cv_seed, 'mean': mean_vals, 'std': std_vals}, f, indent=2)
+    print(f'CV summary saved: {json_path}')
 
     print(f"\n  Final: Macro F1 = {np.mean([f['macro_f1'] for f in all_folds])*100:.2f}% "
           f"+- {np.std([f['macro_f1'] for f in all_folds])*100:.2f}%")
@@ -527,7 +574,7 @@ else:
     te_mask = np.array([s in test_subjects for s in subj_all])
 
     result = train_fold(X_all[tr_mask], y_all[tr_mask], subj_all[tr_mask],
-                        X_all[te_mask], y_all[te_mask])
+                        X_all[te_mask], y_all[te_mask], save_path=args.save)
 
     print(f"\n{'='*60}")
     print("RESULTS")
