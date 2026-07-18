@@ -55,7 +55,7 @@ parser.add_argument('--data', type=str,
                     help='Path to sleep-cassette directory')
 parser.add_argument('--cache', type=str, default=r'F:\sleep_cache',
                     help='Cache directory')
-parser.add_argument('--subjects', type=int, default=80, help='Train subjects')
+parser.add_argument('--subjects', type=int, default=68, help='Train subjects')
 parser.add_argument('--test', type=int, default=10, help='Test subjects')
 parser.add_argument('--epochs', type=int, default=150)
 parser.add_argument('--batch', type=int, default=128)
@@ -69,6 +69,8 @@ parser.add_argument('--save', type=str, default='parasleep_best.pth')
 parser.add_argument('--device', type=str, default='cuda')
 parser.add_argument('--seed', type=int, default=42, help='Global random seed')
 parser.add_argument('--cv-seed', type=int, default=42, help='CV fold split seed')
+parser.add_argument('--strict-dataset', action='store_true',
+                    help='Require exact 153 records, 78 subjects, 68+10 split')
 
 # Angle 2: model variant
 parser.add_argument('--model', type=str, default='parasleep',
@@ -456,6 +458,17 @@ subject_to_records = build_subject_records_map(all_records)
 real_subjects = sorted(subject_to_records.keys())
 print(f'Real subjects: {len(real_subjects)} (from {len(all_records)} records)')
 
+# Strict dataset validation for final protocol
+if args.strict_dataset:
+    expected = {'records': 153, 'subjects': 78, 'train': 68, 'test': 10}
+    if len(all_records) != expected['records']:
+        raise RuntimeError(f"Expected {expected['records']} records, got {len(all_records)}")
+    if len(real_subjects) != expected['subjects']:
+        raise RuntimeError(f"Expected {expected['subjects']} subjects, got {len(real_subjects)}")
+    if args.subjects != expected['train'] or args.test != expected['test']:
+        raise RuntimeError(f"Final protocol: --subjects {expected['train']} --test {expected['test']}")
+    print(f'Strict dataset check: 153 records / 78 subjects / 68+10 split — OK')
+
 rng = np.random.RandomState(args.seed)
 rng.shuffle(real_subjects)
 
@@ -463,23 +476,23 @@ rng.shuffle(real_subjects)
 n_train_subjects = min(args.subjects, len(real_subjects) - args.test)
 n_test_subjects = args.test
 
-train_subjects = set(real_subjects[:n_train_subjects])
-test_subjects = set(real_subjects[n_train_subjects:n_train_subjects + n_test_subjects])
+train_subjects = sorted(real_subjects[:n_train_subjects])
+test_subjects = sorted(real_subjects[n_train_subjects:n_train_subjects + n_test_subjects])
 
-# Expand subjects → record IDs for cache loading
-train_records = [r for s in train_subjects for r in subject_to_records[s]]
-test_records = [r for s in test_subjects for r in subject_to_records[s]]
+# Expand subjects → record IDs for cache loading (sorted for determinism)
+train_records = sorted(r for s in train_subjects for r in subject_to_records[s])
+test_records = sorted(r for s in test_subjects for r in subject_to_records[s])
 
 # Assert disjoint
-assert train_subjects.isdisjoint(test_subjects), \
+assert set(train_subjects).isdisjoint(test_subjects), \
     "Train/test subject overlap detected!"
 print(f'Disjoint check: OK')
 
 # Save split (both subject IDs and record IDs)
 os.makedirs(os.path.dirname(args.save) or '.', exist_ok=True)
 np.savez(args.save.replace('.pth', '_split.npz'),
-         train_subjects=np.array(list(train_subjects)),
-         test_subjects=np.array(list(test_subjects)),
+         train_subjects=np.array(train_subjects),
+         test_subjects=np.array(test_subjects),
          train_records=np.array(train_records),
          test_records=np.array(test_records))
 print(f'Split saved: {args.save.replace(".pth", "_split.npz")}')
@@ -493,7 +506,7 @@ if args.cv > 1:
     X_cv, y_cv, subj_cv = load_windows(train_records, args.cache,
                                         args.context, args.causal)
     cv_unique = np.unique(subj_cv)
-    assert test_subjects.isdisjoint(set(cv_unique)), \
+    assert set(test_subjects).isdisjoint(set(cv_unique)), \
         "Holdout test subjects leaked into CV!"
     print(f'CV isolation check: OK (holdout test subjects excluded)')
 
@@ -570,8 +583,9 @@ else:
                                            args.context, args.causal)
     print(f'\nTraining: {n_train_subjects} real subjects '
           f'({len(train_records)} records), {args.epochs} epochs')
-    tr_mask = np.array([s in train_subjects for s in subj_all])
-    te_mask = np.array([s in test_subjects for s in subj_all])
+    tr_set = set(train_subjects); te_set = set(test_subjects)
+    tr_mask = np.array([s in tr_set for s in subj_all])
+    te_mask = np.array([s in te_set for s in subj_all])
 
     result = train_fold(X_all[tr_mask], y_all[tr_mask], subj_all[tr_mask],
                         X_all[te_mask], y_all[te_mask], save_path=args.save)
@@ -590,5 +604,8 @@ else:
     print("Confusion Matrix:")
     print(confusion_matrix(result['y_true'], result['y_pred']))
 
-print(f"\nModel saved: {args.save}")
+if args.cv > 1:
+    print(f"\nCV fold models saved under: {cv_out_dir}")
+else:
+    print(f"\nModel saved: {args.save}")
 print(f"Done.")
