@@ -143,116 +143,50 @@ def _get_paradigm():
 
 
 # =============================================================================
-# Cache helpers
+# Cache helpers — all delegated to sleep_cache.py
 # =============================================================================
-# Cache version — bump after any change to data extraction, preprocessing, or
-# subject-ID parsing. Old caches MUST NOT be reused across versions.
-CACHE_VERSION = "chronov3"
+from metabci.brainda.datasets.sleep_edf import SleepEDFDataset as _SleepEDFDataset
 
-# Cache naming: {sub}_FpzCz_sr100_ctx{context}_{mode}_{label}_{version}.npz
-
-# Map Sleep Cassette record IDs (e.g. "4001", "4002") to real subject IDs (e.g. "00").
-# SC4ssNE0: ss=subject (00-82), N=night (1-2). Same subject's nights must stay together.
 def _real_subject_id(record_id):
-    """Extract real subject ID from Sleep Cassette record ID."""
     s = str(record_id)
     return s[1:3] if len(s) >= 3 else s
 
-def cache_filename(sub, context, causal, label_mode='5class'):
-    mode = 'causal' if causal else 'center'
-    return f'{sub}_FpzCz_sr100_ctx{context}_{mode}_{label_mode}_{CACHE_VERSION}.npz'
-
-def cache_name_suffix(context, causal, label_mode='5class'):
-    mode = 'causal' if causal else 'center'
-    return f'_FpzCz_sr100_ctx{context}_{mode}_{label_mode}_{CACHE_VERSION}.npz'
-
-def find_cache(sub, cache_dir, context, causal, label_mode='5class'):
-    """Find cache file. Only accepts chronov3 format — NO fallback to old caches."""
-    path = os.path.join(cache_dir, cache_filename(sub, context, causal, label_mode))
-    return path if os.path.exists(path) else None
-
 def build_subject_records_map(record_ids):
-    """Build real-subject-ID → list-of-record-IDs mapping."""
     mapping = {}
     for rid in record_ids:
         sid = _real_subject_id(rid)
         mapping.setdefault(sid, []).append(rid)
     return mapping
 
-def load_cache_subjects(cache_dir, context, causal, label_mode='5class'):
-    if not os.path.isdir(cache_dir):
-        return []
-    suffix = cache_name_suffix(context, causal, label_mode)
-    subs = []
-    for f in os.listdir(cache_dir):
-        if f.endswith(suffix):
-            subs.append(f.replace(suffix, ''))
-    return sorted(subs)
-
 def build_cache(data_root, cache_dir, context, causal):
-    print(f"  Building cache (ctx={context} {MODE}, {CACHE_VERSION}) from raw EDF...")
-    from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
-
-    os.makedirs(cache_dir, exist_ok=True)
-    dataset = SleepEDFDataset(data_root, channel='EEG Fpz-Cz')
+    print(f"  Building cache (ctx={context} {MODE}) ...")
+    dataset = _SleepEDFDataset(data_root, channel='EEG Fpz-Cz')
     paradigm = _get_paradigm()
-
     done, skipped, failed = 0, 0, 0
     for subj_id in dataset.subjects:
-        path = os.path.join(cache_dir, cache_filename(subj_id, context, causal))
-        if os.path.exists(path):
-            skipped += 1
-            continue
+        path = cache_file_path(cache_dir, subj_id, context, causal)
+        if path.exists():
+            skipped += 1; continue
         try:
-            # Load raw data directly (bypass BaseParadigm event-class grouping)
             raw = dataset._get_single_subject_data(subj_id)
             raw_data = raw['session_0']['run_0']
-            sfreq = raw_data.info['sfreq']
-
-            # Apply 0.5-40 Hz bandpass filter (unified preprocessing)
             raw_data.filter(0.5, 40, picks='eeg', verbose=False)
-
-            # Extract epochs in strict chronological order
             X, y, onsets = paradigm.extract_epochs(
-                raw_data, raw_data.annotations, sfreq, dataset.epoch_sec)
-
-            # Build context windows
+                raw_data, raw_data.annotations, raw_data.info['sfreq'], dataset.epoch_sec)
             Xw, yw = paradigm.build_windows(X, y)
-
-            # Save with metadata
-            real_id = _real_subject_id(subj_id)
-            np.savez_compressed(
-                path, X=Xw, y=yw,
-                record_id=str(subj_id), subject_id=real_id,
-                cache_version=CACHE_VERSION,
-                context=context, causal=causal,
-                preprocess="0.5-40Hz_100Hz_uV_noNorm_chronov3",
-            )
+            save_cache_record(cache_dir, subj_id, Xw, yw, _real_subject_id(subj_id),
+                              context, causal)
             done += 1
         except (ValueError, RuntimeError) as e:
             print(f"  [FAILED] record={subj_id}: {type(e).__name__}: {e}")
             failed += 1
-
+    records = discover_records(cache_dir, context, causal)
+    real_subjects = {_SleepEDFDataset.parse_record_id(r)[0] for r in records}
+    save_manifest(cache_dir, context, causal, total_records=len(records),
+                  real_subjects=len(real_subjects))
     print(f"  Cache done: {done} built, {skipped} skipped, {failed} failed")
     if done == 0 and skipped == 0:
-        raise RuntimeError(
-            "No chronov3 caches built or found. "
-            "Check extraction errors above and verify data_root path."
-        )
-
-
-def load_windows(subjects, cache_dir, context, causal):
-    X_list, y_list, subj_list = [], [], []
-    for s in subjects:
-        p = find_cache(s, cache_dir, context, causal)
-        if p is not None:
-            d = np.load(p)
-            X_list.append(d['X']); y_list.append(d['y'])
-            # Use REAL subject ID (without night suffix) for subject-wise splits.
-            # SC4ssNE0 → ss is the subject, N is the night.
-            real_id = _real_subject_id(s)
-            subj_list.extend([real_id] * len(d['y']))
-    return np.concatenate(X_list), np.concatenate(y_list), np.array(subj_list)
+        raise RuntimeError("No caches built. Check data_root path.")
 
 
 # =============================================================================
@@ -455,7 +389,7 @@ print(f'ParaSleep Training — ctx={args.context} {MODE} | model={args.model}')
 print('=' * 60)
 
 build_cache(args.data, args.cache, args.context, args.causal)
-all_records = load_cache_subjects(args.cache, args.context, args.causal)
+all_records = discover_records(args.cache, args.context, args.causal)
 print(f'Cached records: {len(all_records)}')
 
 # Build real-subject → records mapping (SC4001,SC4002 → both belong to subject "00")
@@ -508,7 +442,7 @@ if args.cv > 1:
           f'({n_train_subjects} real subjects)...')
     set_global_seed(args.seed)
 
-    X_cv, y_cv, subj_cv = load_windows(train_records, args.cache,
+    X_cv, y_cv, subj_cv = load_records_batch(args.cache, train_records,
                                         args.context, args.causal)
     cv_unique = np.unique(subj_cv)
     assert set(test_subjects).isdisjoint(set(cv_unique)), \
@@ -584,7 +518,7 @@ if args.cv > 1:
 else:
     # Holdout mode: load both train + test records
     print(f'Loading {len(train_records)} train + {len(test_records)} test records...')
-    X_all, y_all, subj_all = load_windows(train_records + test_records, args.cache,
+    X_all, y_all, subj_all = load_records_batch(args.cache, train_records + test_records,
                                            args.context, args.causal)
     print(f'\nTraining: {n_train_subjects} real subjects '
           f'({len(train_records)} records), {args.epochs} epochs')
