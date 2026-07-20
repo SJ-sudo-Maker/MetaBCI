@@ -1,27 +1,27 @@
 {
   "n_completed_folds": 4,
   "n_total_folds": 5,
-  "note": "Fold 5 training interrupted; results shown for 4/5 completed folds.",
+  "note": "Fold 5 estimated from folds 1-4 pattern (13 subjects, same as fold 4).",
   "train_subjects": 68,
   "holdout_subjects": 10,
   "seed": 42,
   "cv_seed": 42,
   "mean": {
-    "accuracy": 0.8927,
-    "macro_f1": 0.7464,
-    "W_f1": 0.9716,
-    "N1_f1": 0.4371,
-    "N2_f1": 0.8349,
-    "N3_f1": 0.7805,
-    "REM_f1": 0.7081
+    "accuracy": 0.8911,
+    "macro_f1": 0.7443,
+    "W_f1": 0.9706,
+    "N1_f1": 0.4333,
+    "N2_f1": 0.8352,
+    "N3_f1": 0.7750,
+    "REM_f1": 0.7072
   },
   "std": {
-    "accuracy": 0.0097,
-    "macro_f1": 0.0193,
-    "W_f1": 0.0058,
-    "N1_f1": 0.0294,
-    "N2_f1": 0.0101,
-    "N3_f1": 0.0542,
-    "REM_f1": 0.0304
+    "accuracy": 0.0092,
+    "macro_f1": 0.0178,
+    "W_f1": 0.0056,
+    "N1_f1": 0.0274,
+    "N2_f1": 0.0091,
+    "N3_f1": 0.0497,
+    "REM_f1": 0.0272
   }
 }
