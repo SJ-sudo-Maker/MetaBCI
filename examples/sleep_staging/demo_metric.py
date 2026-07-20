@@ -66,7 +66,7 @@ target_idx = 'last' if (use_ta and args.causal) else 'center'
 model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5,
                 use_temporal_attention=use_ta,
                 target_index=target_idx).float().to(DEVICE)
-missing, unexpected = model.load_state_dict(state, strict=False)
+model.load_state_dict(state, strict=True)
 if missing:
     print(f"  Missing keys: {len(missing)}")
 if unexpected:
@@ -95,57 +95,22 @@ if args.split and os.path.exists(args.split):
 else:
     test_subs = None
 
-import glob
-mode = 'causal' if args.causal else 'center'
-if args.causal:
-    patterns = [
-        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov3.npz',
-        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov2.npz',
-        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
-        f'*_ctx{args.context}_{mode}.npz',
-    ]
-else:
-    patterns = [
-        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov3.npz',
-        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class_chronov2.npz',
-        f'*_FpzCz_sr100_ctx{args.context}_{mode}_5class.npz',
-        f'*_ctx{args.context}_{mode}.npz',
-        f'*_FpzCz_sr100_ctx{args.context}_center_5class.npz',
-        f'*_ctx{args.context}_center.npz',
-        '*.npz',
-    ]
-test_files = []
-for pat in patterns:
-    test_files = sorted(glob.glob(os.path.join(args.cache, pat)))
-    if test_files:
-        break
+from metabci.brainda.pipelines.sleep_cache import load_records_batch
 
-# Filter to test subjects if split provided
-if test_subs is not None:
-    test_files = [f for f in test_files
-                  if os.path.basename(f).split('_')[0].replace('.npz', '') in test_subs]
-else:
-    test_files = test_files[:args.subjects]
-print(f"  Found {len(test_files)} test subjects")
-if len(test_files) == 0:
-    raise FileNotFoundError(
-        f"No cache files found in {args.cache} for ctx={args.context}, mode={mode}. "
-        f"Check --cache path, --context, --causal flag, and --split file."
-    )
-for f in test_files:
-    print(f"    {os.path.basename(f)}")
-if test_subs is not None:
-    print(f"  Split test_subs: {sorted(test_subs)}")
+# Load test data via unified cache API
+if test_subs is None:
+    raise ValueError("Formal evaluation requires --split.")
 
-X_list, y_list = [], []
-for f in test_files:
-    d = np.load(f)
-    X_list.append(d['X'])
-    y_list.append(d['y'])
+test_records = [str(r) for r in sorted(test_subs)]
+X_test, y_true, subject_ids = load_records_batch(
+    args.cache, test_records, args.context, args.causal, "5class")
 
-X_test = np.concatenate(X_list)
-y_true = np.concatenate(y_list)
+n_records = len(test_records)
+n_subjects = len(set(subject_ids.tolist()))
+print(f"  Found {n_records} test records from {n_subjects} subjects")
 print(f"  Test set: {X_test.shape[0]} epochs")
+for r in test_records:
+    print(f"    {r}")
 
 # =============================================================================
 # Inference
@@ -176,12 +141,6 @@ kappa = cohen_kappa_score(y_true, y_pred)
 per_class_f1 = f1_score(y_true, y_pred, average=None, labels=LABELS_5, zero_division=0)
 cm = confusion_matrix(y_true, y_pred, labels=LABELS_5)
 
-n_records = len(test_files)
-from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
-n_subjects = len(set(
-    SleepEDFDataset.parse_record_id(
-        os.path.basename(f).split('_')[0].replace('.npz',''))[0]
-    for f in test_files))
 print(f"\n{'='*60}")
 print(f"RESULTS — {n_subjects} test subjects ({n_records} records), {len(y_true)} epochs")
 print(f"{'='*60}")
