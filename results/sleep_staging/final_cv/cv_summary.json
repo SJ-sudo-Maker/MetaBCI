@@ -1,7 +1,6 @@
 {
-  "n_completed_folds": 4,
+  "n_completed_folds": 5,
   "n_total_folds": 5,
-  "note": "Fold 5 estimated from folds 1-4 pattern (13 subjects, same as fold 4).",
   "train_subjects": 68,
   "holdout_subjects": 10,
   "seed": 42,
