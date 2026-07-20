@@ -171,17 +171,17 @@ if os.path.exists(MODEL_PATH):
     model = raw_cls(n_channels=n_ch, n_samples=3000, n_classes=5,
                     use_temporal_attention=use_ta,
                     target_index=target_idx).float()
-    model.load_state_dict(state, strict=False)
+    model.load_state_dict(state, strict=True)
     arch = 'TA' if use_ta else 'Base'
     param_count = sum(p.numel() for p in model.parameters())
     model_info = f"Model: {MODEL_PATH} | {arch} | ctx={n_ch} | {MODE_STR}"
     print(f"Model: loaded ({arch}, ctx={n_ch}, {param_count:,} params)")
     print(f"Demo model info: {model_info}")
 else:
-    print("Model: WARNING — using untrained model (random predictions)!")
-    raw_cls = lwmod.ParaSleep.module
-    model = raw_cls(n_channels=DEMO_CONTEXT, n_samples=3000, n_classes=5).float()
-    model_info = f"Model: RANDOM UNTRAINED | Base | ctx={DEMO_CONTEXT} | {MODE_STR}"
+    raise FileNotFoundError(
+        f"Trained model not found: {MODEL_PATH}. "
+        "Competition demo requires a trained checkpoint."
+    )
 
 model.eval()
 

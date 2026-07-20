@@ -31,7 +31,7 @@ We will send you a copy of the handbook as soon as we receive your information.
 | ParaSleep | `metabci/brainda/algorithms/deep_learning/parasleep.py` | 约 132K 参数：双分支深度可分离卷积 + patch-based MHA |
 | SleepOnlineWorker | `metabci/brainflow/sleep_worker.py` | 在线推理：因果滤波 + 信号质量门控 + LSL |
 | EDFSleepPlayer | `metabci/brainflow/edf_player.py` | EDF 倍速回放，模拟在线数据流 |
-| SleepMonitorUI | `metabci/brainstim/sleep_monitor.py` | 临床睡眠报告：hypnogram + 阶段统计 |
+| SleepMonitorUI | `metabci/brainstim/sleep_monitor.py` | 睡眠报告可视化：hypnogram + 阶段统计 |
 
 ### 快速开始
 
@@ -55,11 +55,11 @@ python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --
 
 ### 实验结果
 
-**主模型（holdout test，10 名受试者）**
+**主模型（holdout test，10 名受试者，19 条记录）**
 
 | 配置 | Accuracy | Macro-F1 | Weighted-F1 | Kappa |
 |---|---:|---:|---:|---:|
-| ctx=3 causal | 88.28% | 0.7468 | 0.8925 | 0.7714 |
+| ctx=3 causal | 88.81% | 0.7204 | 0.8956 | 0.7779 |
 
 | 类别 | Precision | Recall | F1 |
 |---|---:|---:|---:|
@@ -69,25 +69,19 @@ python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --
 | N3 | 0.7683 | 0.7488 | 0.7585 |
 | REM | 0.6702 | 0.8204 | 0.7377 |
 
-配置：`ctx=3 causal | model=parasleep | sampler=none | aux=none | wd=1e-2 | label_smoothing=0 | FocalLoss(γ=2)`
+配置：`ctx=3 causal | model=parasleep | sampler=none | aux=none | wd=1e-2 | label_smoothing=0 | FocalLoss(γ=2) | 68 train / 10 test`
 
-**离线对照（ctx=3 center，非在线可用）**
-
-| 配置 | Accuracy | Macro-F1 | Kappa |
-|---|---:|---:|---:|
-| ctx=3 center | 88.27% | 0.7465 | 0.7705 |
-
-**5-fold CV（ctx=3 causal, 134 subjects, subject-wise）**
+**5-fold CV（ctx=3 causal, 68名开发受试者, 134条记录, subject-wise）**
 
 | 指标 | Mean ± Std |
 |---|---:|
-| Accuracy | 90.38% ± 0.56% |
-| Macro-F1 | 77.06% ± 0.72% |
-| W F1 | 97.70% ± 0.19% |
-| N1 F1 | 46.46% ± 2.78% |
-| N2 F1 | 84.42% ± 1.55% |
-| N3 F1 | 82.97% ± 1.24% |
-| REM F1 | 73.75% ± 3.41% |
+| Accuracy | 89.11% ± 0.92% |
+| Macro-F1 | 74.43% ± 1.78% |
+| W F1 | 97.06% ± 0.56% |
+| N1 F1 | 43.33% ± 2.74% |
+| N2 F1 | 83.52% ± 0.91% |
+| N3 F1 | 77.50% ± 4.97% |
+| REM F1 | 70.72% ± 2.72% |
 
 ### 实验命令
 
@@ -96,7 +90,7 @@ python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --
 python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --save exp_ctx3_causal.pth --cache F:/sleep_cache
 
 # 5-fold CV
-python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --cv 5 --subjects 124 --test 10 --save exp_ctx3_causal_cv.pth --cache F:/sleep_cache
+python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --cv 5 --subjects 68 --test 10 --seed 42 --cv-seed 42 --strict-dataset --save exp_ctx3_causal_cv.pth --cache F:/sleep_cache_chronov3
 
 # 消融实验
 python -u examples/sleep_staging/train_server.py --context 1 --save exp_ctx1.pth --cache F:/sleep_cache
