@@ -15,7 +15,7 @@
 - Architecture: ParaSleep (Base)
 - Parameters: 131,885
 - Loss: Focal Loss (γ=2) + sqrt class weights
-- Optimizer: AdamW (lr=1e-3→1e-4→1e-5, wd=1e-2)
+- Optimizer: AdamW, initial lr=1e-3, reduced to 1e-4 at epoch 11 (60 epochs total)
 - Sampler: none
 - Label smoothing: 0
 - Auxiliary tasks: none

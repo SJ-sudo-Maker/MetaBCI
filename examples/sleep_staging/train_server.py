@@ -162,7 +162,7 @@ def cache_name_suffix(context, causal, label_mode='5class'):
     return f'_FpzCz_sr100_ctx{context}_{mode}_{label_mode}_{CACHE_VERSION}.npz'
 
 def find_cache(sub, cache_dir, context, causal, label_mode='5class'):
-    """Find cache file. Only accepts chronov2 format — NO fallback to old caches."""
+    """Find cache file. Only accepts chronov3 format — NO fallback to old caches."""
     path = os.path.join(cache_dir, cache_filename(sub, context, causal, label_mode))
     return path if os.path.exists(path) else None
 
@@ -231,7 +231,7 @@ def build_cache(data_root, cache_dir, context, causal):
     print(f"  Cache done: {done} built, {skipped} skipped, {failed} failed")
     if done == 0 and skipped == 0:
         raise RuntimeError(
-            "No chronov2 caches built or found. "
+            "No chronov3 caches built or found. "
             "Check extraction errors above and verify data_root path."
         )
 

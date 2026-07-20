@@ -177,7 +177,11 @@ per_class_f1 = f1_score(y_true, y_pred, average=None, labels=LABELS_5, zero_divi
 cm = confusion_matrix(y_true, y_pred, labels=LABELS_5)
 
 n_records = len(test_files)
-n_subjects = len(set(os.path.basename(f).split('_')[0].replace('.npz','') for f in test_files))
+from metabci.brainda.datasets.sleep_edf import SleepEDFDataset
+n_subjects = len(set(
+    SleepEDFDataset.parse_record_id(
+        os.path.basename(f).split('_')[0].replace('.npz',''))[0]
+    for f in test_files))
 print(f"\n{'='*60}")
 print(f"RESULTS — {n_subjects} test subjects ({n_records} records), {len(y_true)} epochs")
 print(f"{'='*60}")

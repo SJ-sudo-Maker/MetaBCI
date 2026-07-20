@@ -44,7 +44,7 @@ pip install torch numpy scipy scikit-learn mne skorch onnx onnxruntime matplotli
 python -u examples/sleep_staging/train_server.py --context 3 --causal --epochs 60 --wd 1e-2 --label_smoothing 0 --save exp_ctx3_causal.pth --cache F:/sleep_cache
 
 # 评估 holdout test
-python examples/sleep_staging/demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache --context 3 --causal --out demo_outputs_ctx3_causal
+python examples/sleep_staging/demo_metric.py --model exp_ctx3_causal.pth --split exp_ctx3_causal_split.npz --cache F:/sleep_cache_chronov3 --context 3 --causal --out demo_outputs_ctx3_causal
 
 # 演示
 python examples/sleep_staging/demo_e2e.py
@@ -55,19 +55,11 @@ python examples/sleep_staging/export_onnx.py --checkpoint exp_ctx3_causal.pth --
 
 ### 实验结果
 
-**主模型（holdout test，10 名受试者，19 条记录）**
+**主模型 — Holdout（10 名受试者，19 条记录）**
 
 | 配置 | Accuracy | Macro-F1 | Weighted-F1 | Kappa |
 |---|---:|---:|---:|---:|
 | ctx=3 causal | 88.81% | 0.7204 | 0.8956 | 0.7779 |
-
-| 类别 | Precision | Recall | F1 |
-|---|---:|---:|---:|
-| W | 0.9837 | 0.9593 | 0.9714 |
-| N1 | 0.5671 | 0.3936 | 0.4649 |
-| N2 | 0.7497 | 0.8620 | 0.8013 |
-| N3 | 0.7683 | 0.7488 | 0.7585 |
-| REM | 0.6702 | 0.8204 | 0.7377 |
 
 配置：`ctx=3 causal | model=parasleep | sampler=none | aux=none | wd=1e-2 | label_smoothing=0 | FocalLoss(γ=2) | 68 train / 10 test`
 

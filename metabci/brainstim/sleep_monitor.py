@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-SleepMonitorUI: clinical-grade sleep report visualization.
+SleepMonitorUI: research-oriented sleep report visualization.
 
-Uses AASM-standard hypnogram layout with step-plot rendering.
+Uses standard hypnogram layout with step-plot rendering.
 """
 
 from typing import Optional, List, Dict
@@ -21,7 +21,7 @@ from matplotlib.figure import Figure
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial']
 plt.rcParams['axes.unicode_minus'] = False
 
-# ---- AASM standard clinical colors ----
+# ---- Sleep stage color palette ----
 STAGE_COLORS = {
     0: "#E8E8E8",  # W   — light gray (wake)
     1: "#A8D8EA",  # N1  — light blue
@@ -36,7 +36,7 @@ STAGE_Y_POS = {0: 0.5, 1: 2.0, 2: 3.5, 3: 5.0, 4: 6.5}
 
 
 # ===========================================================================
-# Core hypnogram renderer (clinical step-plot style)
+# Core hypnogram renderer (sleep step-plot style)
 # ===========================================================================
 
 def build_sleep_report(
@@ -44,7 +44,7 @@ def build_sleep_report(
     epoch_sec: int = 30,
     title: str = "Sleep Report",
 ) -> Figure:
-    """Generate a clinical-grade sleep report.
+    """Generate a research-oriented sleep report.
 
     Parameters
     ----------
@@ -91,7 +91,7 @@ def build_sleep_report(
     gs = fig.add_gridspec(2, 2, width_ratios=[3, 1], height_ratios=[2, 1],
                           hspace=0.35, wspace=0.25)
 
-    # (A) Hypnogram — clinical step-plot style
+    # (A) Hypnogram — sleep step-plot style
     ax_hypno = fig.add_subplot(gs[:, 0], facecolor='#FAFAFA')
 
     # Draw each epoch as a colored horizontal bar with clear boundaries
@@ -103,7 +103,7 @@ def build_sleep_report(
             color=color, alpha=0.95, edgecolor='white', linewidth=0.3,
         )
 
-    # Y axis: AASM order with spacing
+    # Y axis: stage order with spacing
     ax_hypno.set_yticks([STAGE_Y_POS[s] for s in range(5)])
     ax_hypno.set_yticklabels(STAGE_NAMES, fontsize=10, fontweight='bold')
     ax_hypno.set_ylim(-0.8, 7.8)
@@ -202,7 +202,7 @@ def _draw_metrics_table(ax, total_min, latency_min, tst_min,
 # ===========================================================================
 
 class SleepMonitorUI:
-    """Real-time clinical sleep stage monitor.
+    """Real-time sleep sleep stage monitor.
 
     Opens a window that updates as new predictions arrive.
     """
@@ -305,7 +305,7 @@ def generate_report(
     predictions: List[int], output_path: str,
     epoch_sec: int = 30, title: str = "Sleep Report",
 ):
-    """Save a clinical sleep report to file."""
+    """Save a sleep sleep report to file."""
     fig = build_sleep_report(predictions, epoch_sec, title)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
