@@ -31,6 +31,11 @@ from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 
 import metabci.brainda.algorithms.deep_learning.parasleep as lwmod
+from metabci.brainda.pipelines.sleep_cache import (
+    CACHE_SCHEMA_VERSION, cache_file_path, cache_config_dir,
+    save_cache_record, discover_records, load_records_batch,
+    save_manifest, PREPROCESS_DESCRIPTION,
+)
 
 
 def set_global_seed(seed):
